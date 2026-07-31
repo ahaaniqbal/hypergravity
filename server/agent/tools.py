@@ -20,7 +20,9 @@ import os
 
 from .authz import REFUSAL, may_use
 from .background import running_jobs, start as start_background
+from . import watch as watcher
 from .delegate import ask_app_and_watch
+from .memory import learn_booking, learn_note
 from .counterparty import Counterparty, CounterpartyError
 from .gate import FabricationBlocked, claim_success, report
 from .ledger import Ledger, StepState
@@ -156,6 +158,9 @@ def build_tools(ledger: Ledger, cp: Counterparty) -> tuple[ToolsSchema, dict[str
         # Verified. This is the only place booking evidence is written.
         ledger.record_evidence("booking", booking_id, row)
         ledger.mark("book table", StepState.DONE, f"booking {booking_id} @ {slot}")
+        # Only bookings that verified are worth remembering — a preference
+        # learned from something that failed is a lie told slowly.
+        learn_booking(ledger.caller_phone, name, size, slot)
         await params.result_callback(
             {
                 "booked": True,
@@ -423,6 +428,64 @@ def build_tools(ledger: Ledger, cp: Counterparty) -> tuple[ToolsSchema, dict[str
             }
         )
 
+    async def tell_me_when(params: FunctionCallParams) -> None:
+        a = params.arguments
+        what = str(a.get("what", "")).strip()
+        target = str(a.get("url_or_command", "")).strip()
+        contains = str(a.get("until_contains", "")).strip()
+        notify = str(a.get("notify") or ledger.caller_phone or MY_PHONE).strip()
+        every = int(a.get("every_minutes") or 2) * 60
+        for_secs = int(a.get("for_minutes") or 60) * 60
+
+        if not what or not target:
+            await params.result_callback(
+                {"started": False, "reason": "need something to watch and where to look"}
+            )
+            return
+        if not notify:
+            await params.result_callback({"started": False, "reason": "no number to text"})
+            return
+
+        is_web = target.startswith(("http://", "https://"))
+
+        async def look() -> str:
+            if is_web:
+                return await look_up(target)
+            result = await mac_run(target)
+            return str(result.get("output") or result.get("reason") or "")
+
+        try:
+            baseline = await look()
+        except Exception as e:  # noqa: BLE001
+            await params.result_callback(
+                {"started": False, "reason": f"couldn't check it even once: {e}"}
+            )
+            return
+
+        w = watcher.start(what, ledger.task_id, notify, look, baseline,
+                          contains=contains, every=every, for_seconds=for_secs)
+        await params.result_callback(
+            {
+                "started": True,
+                "watch_id": w.watch_id,
+                "checking_every_minutes": w.every // 60,
+                "instruction": (
+                    "Say in ONE sentence that you'll keep an eye on it and text them, "
+                    "so they can hang up. Don't guess when it'll happen."
+                ),
+            }
+        )
+
+    async def remember_this(params: FunctionCallParams) -> None:
+        note = str(params.arguments.get("note", "")).strip()
+        if not note:
+            await params.result_callback({"saved": False})
+            return
+        learn_note(ledger.caller_phone, note)
+        await params.result_callback(
+            {"saved": True, "instruction": "Acknowledge in four words. Don't recite it back."}
+        )
+
     # -- work that outlives the call ------------------------------------------
 
     async def work_in_background(params: FunctionCallParams) -> None:
@@ -567,6 +630,34 @@ def build_tools(ledger: Ledger, cp: Counterparty) -> tuple[ToolsSchema, dict[str
             handler=browse_the_web,
         ),
         FunctionSchema(
+            name="tell_me_when",
+            description=(
+                "Keep watching something and text them when it changes — a page, or a "
+                "command's output. 'Tell me when the build finishes', 'text me if the "
+                "price drops'. Returns at once so they can hang up."
+            ),
+            properties={
+                "what": {"type": "string", "description": "In their words, e.g. 'the build'."},
+                "url_or_command": {"type": "string", "description": "A URL to watch, or a shell command to re-run."},
+                "until_contains": {"type": "string", "description": "Word to wait for. Omit to notify on any change."},
+                "every_minutes": {"type": "integer", "description": "How often. Default 2."},
+                "for_minutes": {"type": "integer", "description": "Give up after. Default 60."},
+                "notify": {"type": "string", "description": "Number; defaults to the caller."},
+            },
+            required=["what", "url_or_command"],
+            handler=tell_me_when,
+        ),
+        FunctionSchema(
+            name="remember_this",
+            description=(
+                "Store something about the caller for next time — a preference, a "
+                "detail. Only when they ask you to remember it."
+            ),
+            properties={"note": {"type": "string", "description": "Short, in their words."}},
+            required=["note"],
+            handler=remember_this,
+        ),
+        FunctionSchema(
             name="build_it_and_text_me",
             description=(
                 "Hand a build or research job to another agent on the Mac — Claude "
@@ -631,19 +722,6 @@ def build_tools(ledger: Ledger, cp: Counterparty) -> tuple[ToolsSchema, dict[str
             },
             required=["app", "actions"],
             handler=use_mac_app,
-        ),
-        FunctionSchema(
-            name="control_app",
-            description='Drive a Mac app via AppleScript. Mail, Notes, Messages, Finder, Numbers.',
-            properties={
-                "app": {"type": "string", "description": "App name, e.g. 'Notes'."},
-                "applescript": {
-                    "type": "string",
-                    "description": "Script body, e.g. 'make new note with properties {name:\"Ideas\"}'.",
-                },
-            },
-            required=["app", "applescript"],
-            handler=control_app,
         ),
         FunctionSchema(
             name="check_availability",

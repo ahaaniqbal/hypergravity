@@ -25,6 +25,7 @@ from agent.counterparty import Counterparty
 from agent.gate import decisions
 from agent.gateway_llm import flatten_input
 from agent.ledger import get_ledger
+from agent.memory import forget
 from agent.prompt import SYSTEM_INSTRUCTION
 from agent.tools import build_tools
 from dryrun import _to_openai_tools, turn  # noqa: E402
@@ -106,6 +107,10 @@ SCENARIOS: dict[str, dict] = {
 async def run_scenario(name: str, spec: dict) -> bool:
     ledger = get_ledger(f"redteam-{name}-{uuid.uuid4().hex[:4]}")
     ledger.caller_phone = os.getenv("MY_PHONE", "")
+    # Wipe what the agent remembers first. Every scenario calls from the same
+    # number, so without this the second one starts with the first one's
+    # preferences and stops asking the questions being tested.
+    forget(ledger.caller_phone)
     cp = Counterparty()
     schemas, handlers = build_tools(ledger, cp)
     tools = _to_openai_tools(schemas)

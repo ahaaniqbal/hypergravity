@@ -44,6 +44,7 @@ from agent.fillers import line_for
 from agent.gateway_llm import A1GatewayLLMService
 from agent.ledger import open_task
 from agent.mac_calendar import warm_busy_cache
+from agent.memory import start_call
 from agent.prompt import SYSTEM_INSTRUCTION
 from agent.tools import build_tools
 
@@ -76,6 +77,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
     caller = getattr(call_data, "from_number", None) if call_data else None
 
     ledger = open_task(TASK_BASE, caller=caller)
+    profile = start_call(caller or "")
     if caller:
         ledger.note(phone=caller)
         logger.info(f"caller: {caller} → task {ledger.task_id}")
@@ -231,6 +233,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
                     "content": "Hey, it's HyperGravity. What do you need?",
                 }
             )
+            # What we know about this caller from previous calls. Offered, not
+            # assumed: a returning caller shouldn't be re-interrogated, but
+            # people do change their minds.
+            if brief := profile.brief():
+                context.add_message({"role": "system", "content": brief})
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
