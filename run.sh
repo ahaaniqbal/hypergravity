@@ -72,6 +72,24 @@ if [ "${1:-}" = "status" ]; then
   exit 0
 fi
 
+# Refuse to run twice. Two supervisors each restart their own bot, both fight
+# over port 7860, and a call that lands on one is killed a second later when the
+# other takes the port — which the caller hears as an answered line that then
+# goes silent. Nothing in the status output looks wrong while it is happening.
+others=$(pgrep -f "bash .*run\.sh" | grep -v "^$$\$" || true)
+if [ -n "$others" ]; then
+  bad "run.sh is already running (pid $(echo "$others" | tr '\n' ' '))"
+  echo "   Stop it first:  pkill -f run.sh"
+  exit 1
+fi
+
+# Anything left from a previous run holds the port and does the same damage.
+if pgrep -f "bot.py -t telnyx" >/dev/null; then
+  say "clearing an orphaned bot"
+  pkill -f "bot.py -t telnyx"
+  sleep 2
+fi
+
 say "starting"
 [ -n "$(current_url)" ] && pgrep -f cloudflared >/dev/null || start_tunnel
 export TUNNEL_HOST="$(current_url | sed 's|https://||')"
