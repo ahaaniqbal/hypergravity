@@ -194,15 +194,35 @@ def _human_step(names: str) -> str:
 
 
 async def bot(runner_args: RunnerArguments):
-    """Entry point. ``create_transport`` picks the front door."""
-    transport_params = {
-        # create_transport wires the Telnyx serializer (a1mobile speaks TeXML).
-        "telnyx": lambda: FastAPIWebsocketParams(
-            audio_in_enabled=True,
-            audio_out_enabled=True,
-        ),
-    }
-    transport = await create_transport(runner_args, transport_params)
+    """Entry point — builds the Telnyx transport by hand.
+
+    ``create_transport`` would do this for us, but it constructs
+    ``TelnyxFrameSerializer`` with ``auto_hang_up`` left at its default of True,
+    which requires a ``TELNYX_API_KEY`` to call the hangup REST endpoint. We
+    don't have one: a1mobile fronts Telnyx and issues only SIP credentials, so
+    the serializer raised before a single audio frame moved and the caller heard
+    silence on an answered line.
+
+    Turning auto_hang_up off costs nothing here — the call ends when the caller
+    hangs up or the websocket closes, which is what we want anyway.
+    """
+    from pipecat.serializers.telnyx import TelnyxFrameSerializer
+    from pipecat.transports.websocket.fastapi import FastAPIWebsocketTransport
+
+    call_data = runner_args.call_data
+    params = FastAPIWebsocketParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+        add_wav_header=False,  # always false for telephony
+    )
+    params.serializer = TelnyxFrameSerializer(
+        stream_id=call_data["stream_id"],
+        call_control_id=call_data["call_id"],
+        outbound_encoding=call_data["outbound_encoding"],
+        inbound_encoding="PCMU",
+        params=TelnyxFrameSerializer.InputParams(auto_hang_up=False),
+    )
+    transport = FastAPIWebsocketTransport(websocket=runner_args.websocket, params=params)
     await run_bot(transport, runner_args)
 
 
