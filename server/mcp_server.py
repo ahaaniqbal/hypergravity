@@ -1,0 +1,188 @@
+"""HyperGravity as an MCP server — the desk-side front door.
+
+VoiceOS is an MCP *client*: you point it at a server and every tool becomes
+something you can just ask for out loud. So rather than building a second
+microphone pipeline, VoiceOS *is* the desk transport. It launches this file
+over stdio and speaks to the same orchestrator the phone reaches.
+
+The ledger is shared through ``.ledgers.json``, so a task begun here can be
+finished on the phone — and the verification gate is the same gate. There is no
+second, laxer path to claiming success.
+
+Connect it in VoiceOS: Settings → Integrations → Custom Integrations → Add
+
+    Name:     HyperGravity
+    Command:  <repo>/server/.venv/bin/python <repo>/server/mcp_server.py
+"""
+
+from __future__ import annotations
+
+import asyncio
+import os
+from pathlib import Path
+
+from dotenv import load_dotenv
+from mcp.server import MCPServer
+
+load_dotenv(dotenv_path=Path(__file__).resolve().parent.parent / ".env", override=True)
+
+from agent.counterparty import Counterparty  # noqa: E402  (needs env first)
+from agent.gate import FabricationBlocked, claim_success, report  # noqa: E402
+from agent.ledger import StepState, get_ledger  # noqa: E402
+
+TASK_ID = os.getenv("TASK_ID", "hypergravity-live")
+
+# mcp 2.x renamed FastMCP -> MCPServer; VoiceOS's guide documents the 1.x name.
+mcp = MCPServer("hypergravity")
+
+
+def _ledger():
+    return get_ledger(TASK_ID)
+
+
+async def _with_counterparty(fn):
+    cp = Counterparty()
+    try:
+        return await fn(cp)
+    finally:
+        await cp.aclose()
+
+
+@mcp.tool()
+async def check_availability() -> str:
+    """List which reservation times the restaurant actually has free tonight.
+
+    Call this before offering the caller any time, and again after any refusal.
+    """
+    async def run(cp: Counterparty):
+        slots = await cp.get_availability()
+        free = [s["time"] for s in slots if s.get("available")]
+        taken = [s["time"] for s in slots if not s.get("available")]
+        _ledger().mark("check availability", StepState.DONE)
+        return (
+            f"Free: {', '.join(free) or 'nothing'}. "
+            f"Unavailable: {', '.join(taken) or 'none'}. "
+            "Only offer a time from the free list."
+        )
+
+    return await _with_counterparty(run)
+
+
+@mcp.tool()
+async def book_table(name: str, party_size: int, time_slot: str, notes: str = "") -> str:
+    """Attempt a reservation, then independently verify it landed.
+
+    This can fail — the slot may be taken. Believe only what this returns, not
+    what the restaurant claims. Do not tell anyone it is booked unless the reply
+    below says it was verified.
+
+    Args:
+        name: Name to hold the reservation under.
+        party_size: Number of people.
+        time_slot: Exact slot, e.g. "18:30".
+        notes: Any special request.
+    """
+    led = _ledger()
+
+    async def run(cp: Counterparty):
+        led.party_name, led.requested_slot, led.party_size = name, time_slot, party_size
+        led.mark("book table", StepState.PENDING)
+
+        resp = await cp.create_booking(
+            name=name,
+            party_size=party_size,
+            time_slot=time_slot,
+            phone=led.caller_phone or os.getenv("A1_PHONE_NUMBER", ""),
+            notes=notes,
+        )
+        booking_id = resp.get("booking_id")
+        if not booking_id:
+            reason = resp.get("_text") or "the restaurant refused the booking"
+            led.mark("book table", StepState.FAILED, reason)
+            return (
+                f"NOT BOOKED — {reason}. Do not say it is booked. "
+                "Check availability and offer two real alternatives."
+            )
+
+        row = await cp.confirm_booking_landed(booking_id, time_slot, party_size)
+        if row is None:
+            led.mark("book table", StepState.FAILED, "read-back failed")
+            return (
+                "NOT CONFIRMED — the restaurant returned a number but the booking does "
+                "not appear in their system on re-check. You may not report success."
+            )
+
+        led.record_evidence("booking", booking_id, row)
+        led.mark("book table", StepState.DONE, f"booking {booking_id} @ {time_slot}")
+        return (
+            f"VERIFIED — booking {booking_id} for {party_size} at {time_slot} under {name}, "
+            f"re-read from the restaurant's own system. "
+            f"Now call claim_task_complete with token {booking_id}."
+        )
+
+    return await _with_counterparty(run)
+
+
+@mcp.tool()
+async def send_sms_confirmation(body: str, to: str = "") -> str:
+    """Text the confirmation. Only after a verified booking.
+
+    Args:
+        body: Short confirmation message.
+        to: Destination in E.164; defaults to the number on the task.
+    """
+    led = _ledger()
+    dest = to or led.caller_phone or os.getenv("MY_PHONE", "")
+    if not dest:
+        return "No destination number on file — ask for one."
+
+    async def run(cp: Counterparty):
+        led.mark("send SMS", StepState.PENDING)
+        resp = await cp.send_confirmation_sms(to=dest, body=body)
+        prose = str(resp.get("_text", ""))
+        if "error" in prose.lower() or "not allowed" in prose.lower():
+            led.mark("send SMS", StepState.FAILED, prose)
+            return (
+                f"TEXT NOT SENT — {prose}. Say so plainly; keep it separate from the "
+                "booking, which may still be fine."
+            )
+        led.record_evidence("sms", dest, {"to": dest, "body": body})
+        led.mark("send SMS", StepState.DONE, f"to {dest}")
+        return f"Text delivered to {dest}."
+
+    return await _with_counterparty(run)
+
+
+@mcp.tool()
+def claim_task_complete(token: str, kind: str = "booking") -> str:
+    """The only way to report the task done.
+
+    Requires a confirmation identifier the restaurant actually issued and that
+    was independently re-read. If this refuses, report honestly instead — a
+    fabricated success is worse than an admitted failure.
+
+    Args:
+        token: The booking id you were given.
+        kind: "booking" or "sms".
+    """
+    led = _ledger()
+    try:
+        result = claim_success(led, kind, token)
+    except FabricationBlocked as e:
+        return f"REFUSED — {e} Truthful status: {report(led)}"
+    return f"CONFIRMED — {kind} {result['token']}. Evidence: {result['evidence']}"
+
+
+@mcp.tool()
+def task_status() -> str:
+    """What is done, pending and verified on the current task.
+
+    Use this to pick up a task that was started on the phone, or after an
+    interruption, instead of asking everything again.
+    """
+    led = _ledger()
+    return f"{led.summary()}\n\n{report(led)}"
+
+
+if __name__ == "__main__":
+    mcp.run(transport="stdio")

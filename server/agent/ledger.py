@@ -10,9 +10,11 @@ mic can be finished over the phone.
 
 from __future__ import annotations
 
+import json
 import time
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 from typing import Any
 
 from . import events
@@ -68,6 +70,7 @@ class Ledger:
         if detail:
             s.detail = detail
         events.step(name, state.value, s.detail)
+        save()
 
     @property
     def pending(self) -> list[str]:
@@ -86,6 +89,7 @@ class Ledger:
     def record_evidence(self, kind: str, token: str, payload: dict[str, Any]) -> None:
         """Called ONLY from tool handlers, with what the counterparty returned."""
         self.verified.setdefault(kind, {})[str(token)] = payload
+        save()
 
     def has_evidence(self, kind: str, token: str) -> bool:
         return str(token) in self.verified.get(kind, {})
@@ -117,14 +121,68 @@ class Ledger:
 
 _LEDGERS: dict[str, Ledger] = {}
 
+# The phone bot and the VoiceOS MCP server are separate processes — VoiceOS
+# launches ours over stdio — so the ledger has to live on disk for a task begun
+# at the desk to be finished on the phone.
+STORE = Path(__file__).resolve().parent.parent / ".ledgers.json"
+
+
+def _serialise(led: Ledger) -> dict[str, Any]:
+    return {
+        "task_id": led.task_id,
+        "goal": led.goal,
+        "caller_phone": led.caller_phone,
+        "party_name": led.party_name,
+        "party_size": led.party_size,
+        "requested_slot": led.requested_slot,
+        "steps": [{"name": s.name, "state": s.state.value, "detail": s.detail} for s in led.steps],
+        "verified": led.verified,
+        "created_at": led.created_at,
+    }
+
+
+def _deserialise(d: dict[str, Any]) -> Ledger:
+    led = Ledger(
+        task_id=d["task_id"],
+        goal=d.get("goal", ""),
+        caller_phone=d.get("caller_phone", ""),
+        party_name=d.get("party_name", ""),
+        party_size=d.get("party_size", 0),
+        requested_slot=d.get("requested_slot", ""),
+        verified=d.get("verified", {}),
+        created_at=d.get("created_at", time.time()),
+    )
+    led.steps = [Step(s["name"], StepState(s["state"]), s.get("detail", "")) for s in d.get("steps", [])]
+    return led
+
+
+def save() -> None:
+    """Best effort. A failed write must never break a live call."""
+    try:
+        STORE.write_text(json.dumps({k: _serialise(v) for k, v in _LEDGERS.items()}, indent=2))
+    except OSError:
+        pass
+
+
+def _load() -> None:
+    try:
+        raw = json.loads(STORE.read_text())
+    except (OSError, json.JSONDecodeError):
+        return
+    for task_id, d in raw.items():
+        if task_id not in _LEDGERS:
+            _LEDGERS[task_id] = _deserialise(d)
+
 
 def get_ledger(task_id: str) -> Ledger:
-    """Fetch or create. Shared across transports — this is what makes the
-    desk-to-phone handoff work."""
+    """Fetch or create. Shared across transports *and processes* — this is what
+    makes the desk-to-phone handoff work."""
+    _load()
     if task_id not in _LEDGERS:
         _LEDGERS[task_id] = Ledger(task_id=task_id)
     return _LEDGERS[task_id]
 
 
 def all_ledgers() -> dict[str, Ledger]:
+    _load()
     return _LEDGERS

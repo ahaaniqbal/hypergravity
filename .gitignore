@@ -222,3 +222,4 @@ __marimo__/
 # Node.js (client/)
 
 server/verification_log.jsonl
+server/.ledgers.json
