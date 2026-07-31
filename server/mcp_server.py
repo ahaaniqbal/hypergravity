@@ -29,6 +29,7 @@ load_dotenv(dotenv_path=Path(__file__).resolve().parent.parent / ".env", overrid
 from agent.counterparty import Counterparty  # noqa: E402  (needs env first)
 from agent.gate import FabricationBlocked, claim_success, report  # noqa: E402
 from agent.ledger import StepState, get_ledger  # noqa: E402
+from agent.mac_calendar import CalendarError, add_verified_event  # noqa: E402
 
 TASK_ID = os.getenv("TASK_ID", "hypergravity-live")
 
@@ -154,23 +155,59 @@ async def send_sms_confirmation(body: str, to: str = "") -> str:
 
 
 @mcp.tool()
-def claim_task_complete(token: str, kind: str = "booking") -> str:
-    """The only way to report the task done.
+async def add_to_calendar(time_slot: str = "", title: str = "", notes: str = "") -> str:
+    """Put the confirmed booking in this Mac's own Calendar, then re-read it.
 
-    Requires a confirmation identifier the restaurant actually issued and that
-    was independently re-read. If this refuses, report honestly instead — a
+    Only after a verified booking. A judge can check this one with no
+    credentials at all — they just open Calendar.
+
+    Args:
+        time_slot: Exact slot, e.g. "18:30". Defaults to the slot on the task.
+        title: Event title. Defaults to "Dinner for N".
+        notes: Anything worth remembering.
+    """
+    led = _ledger()
+    slot = time_slot or led.requested_slot
+    if not slot:
+        return "No time slot known yet — book the table first."
+
+    try:
+        row = await add_verified_event(
+            title or f"Dinner for {led.party_size or 2}", slot, notes
+        )
+    except CalendarError as e:
+        led.mark("add to calendar", StepState.FAILED, str(e))
+        return f"NOT ADDED — {e}. The booking itself may still be fine."
+
+    if row is None:
+        led.mark("add to calendar", StepState.FAILED, "read-back failed")
+        return "NOT CONFIRMED — the event was created but is not in the calendar on re-check."
+
+    led.record_evidence("calendar", row["uid"], row)
+    led.mark("add to calendar", StepState.DONE, row["starts"])
+    return f"VERIFIED — '{row['summary']}' is in the {row['calendar']} calendar at {row['starts']}."
+
+
+@mcp.tool()
+def claim_task_complete(booking_id: str) -> str:
+    """The only way to report the task done. Call it ONCE per task.
+
+    Requires the booking id the restaurant issued and that was independently
+    re-read. The text and the calendar entry are covered by this same claim —
+    never call this again for those. If it refuses, report honestly instead: a
     fabricated success is worse than an admitted failure.
 
     Args:
-        token: The booking id you were given.
-        kind: "booking" or "sms".
+        booking_id: The booking id book_table returned.
     """
     led = _ledger()
     try:
-        result = claim_success(led, kind, token)
+        result = claim_success(led, "booking", booking_id)
     except FabricationBlocked as e:
         return f"REFUSED — {e} Truthful status: {report(led)}"
-    return f"CONFIRMED — {kind} {result['token']}. Evidence: {result['evidence']}"
+    also = result.get("also_verified") or {}
+    extra = f" Also verified: {also}." if also else ""
+    return f"CONFIRMED — booking {result['token']}.{extra}"
 
 
 @mcp.tool()

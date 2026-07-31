@@ -17,6 +17,7 @@ from pipecat.services.llm_service import FunctionCallParams
 from .counterparty import Counterparty, CounterpartyError
 from .gate import FabricationBlocked, claim_success, report
 from .ledger import Ledger, StepState
+from .mac_calendar import CalendarError, add_verified_event
 
 
 def build_tools(ledger: Ledger, cp: Counterparty) -> tuple[ToolsSchema, dict[str, Any]]:
@@ -166,18 +167,62 @@ def build_tools(ledger: Ledger, cp: Counterparty) -> tuple[ToolsSchema, dict[str
         ledger.mark("send SMS", StepState.DONE, f"to {to}")
         await params.result_callback({"sent": True, "to": to, "response": resp})
 
+    # -- the caller's own machine --------------------------------------------
+
+    async def add_to_calendar(params: FunctionCallParams) -> None:
+        a = params.arguments
+        slot = str(a.get("time_slot") or ledger.requested_slot).strip()
+        title = str(a.get("title") or f"Dinner for {ledger.party_size or 2}").strip()
+        if not slot:
+            await params.result_callback({"added": False, "reason": "no time slot known yet"})
+            return
+
+        ledger.mark("add to calendar", StepState.PENDING)
+        try:
+            row = await add_verified_event(title, slot, str(a.get("notes", "")))
+        except CalendarError as e:
+            ledger.mark("add to calendar", StepState.FAILED, str(e))
+            await params.result_callback(
+                {
+                    "added": False,
+                    "reason": str(e),
+                    "instruction": "Say the calendar entry did not go in. The booking may still be fine.",
+                }
+            )
+            return
+
+        if row is None:
+            ledger.mark("add to calendar", StepState.FAILED, "read-back failed")
+            await params.result_callback(
+                {"added": False, "reason": "the event was created but is not in the calendar on re-check"}
+            )
+            return
+
+        ledger.record_evidence("calendar", row["uid"], row)
+        ledger.mark("add to calendar", StepState.DONE, row["starts"])
+        await params.result_callback({"added": True, "event": row})
+
     # -- the gate -------------------------------------------------------------
 
     async def claim_task_complete(params: FunctionCallParams) -> None:
         a = params.arguments
         try:
-            result = claim_success(ledger, str(a.get("kind", "booking")), str(a.get("token", "")))
+            result = claim_success(ledger, "booking", str(a.get("booking_id", "")))
         except FabricationBlocked as e:
             await params.result_callback(
                 {"allowed": False, "you_must_say": str(e), "truthful_status": report(ledger)}
             )
             return
-        await params.result_callback({"allowed": True, **result})
+        await params.result_callback(
+            {
+                "allowed": True,
+                **result,
+                "instruction": (
+                    "Call this ONCE per task. Anything under 'also_verified' is already "
+                    "confirmed — mention it, do not claim it again."
+                ),
+            }
+        )
 
     async def task_status(params: FunctionCallParams) -> None:
         """Lets the agent resume honestly after an interruption or a transport
@@ -224,17 +269,34 @@ def build_tools(ledger: Ledger, cp: Counterparty) -> tuple[ToolsSchema, dict[str
             handler=send_sms_confirmation,
         ),
         FunctionSchema(
-            name="claim_task_complete",
+            name="add_to_calendar",
             description=(
-                "The ONLY way to tell the caller the task is done. Requires a confirmation "
-                "identifier the restaurant actually issued. If this returns allowed=false, "
-                "you must report honestly instead."
+                "Put the confirmed booking in the caller's own Mac calendar. "
+                "Only after a verified booking."
             ),
             properties={
-                "kind": {"type": "string", "description": "'booking' or 'sms'."},
-                "token": {"type": "string", "description": "The booking_id you were given."},
+                "title": {"type": "string", "description": "Event title, e.g. 'Dinner for 2'."},
+                "time_slot": {"type": "string", "description": "Exact slot, e.g. '18:30'."},
+                "notes": {"type": "string", "description": "Anything worth remembering."},
             },
-            required=["kind", "token"],
+            required=[],
+            handler=add_to_calendar,
+        ),
+        FunctionSchema(
+            name="claim_task_complete",
+            description=(
+                "The ONLY way to tell the caller the task is done. Call it ONCE, with the "
+                "booking id the restaurant issued. The text and the calendar entry are "
+                "covered by the same claim — never call this again for those. "
+                "If it returns allowed=false, report honestly instead."
+            ),
+            properties={
+                "booking_id": {
+                    "type": "string",
+                    "description": "The booking_id book_table returned.",
+                },
+            },
+            required=["booking_id"],
             handler=claim_task_complete,
         ),
         FunctionSchema(

@@ -71,6 +71,8 @@ def _how_to_check(kind: str, token: str) -> str:
         return f"curl -H 'X-Team-Key: <key>' {REST_BASE}/api/bookings  → look for id {token}"
     if kind == "sms":
         return f"check the handset at {token} for the confirmation text"
+    if kind == "calendar":
+        return "open Calendar.app — the event is in the Home calendar, no credentials needed"
     return token
 
 
@@ -85,9 +87,15 @@ class FabricationBlocked(Exception):
 def claim_success(ledger: Ledger, kind: str, token: str) -> dict[str, Any]:
     """The ONLY way the agent may assert a task completed.
 
-    ``kind`` is the evidence channel (``booking`` / ``sms``); ``token`` is the
-    identifier the counterparty returned. Both must already be in the ledger,
-    put there by a tool handler that saw the counterparty's own response.
+    ``token`` is the booking identifier the counterparty returned; it must
+    already be in the ledger, put there by a tool handler that saw the
+    counterparty's own response.
+
+    The claim is made **once, for the task**, against the booking — not once per
+    side effect. Gating each artifact separately invited the model to guess which
+    token belonged to which channel, and a wrong guess made it disown work that
+    had genuinely landed. Under-reporting is safer than lying, but it is still
+    wrong. The extra artifacts ride along as evidence instead.
     """
     token = str(token or "").strip()
 
@@ -132,11 +140,15 @@ def claim_success(ledger: Ledger, kind: str, token: str) -> dict[str, Any]:
         verdict="ALLOWED",
         kind=kind,
         token=token,
-        reason=f"{kind} {token} verified against counterparty response",
+        reason=f"{kind} {token} verified by independent read-back",
         evidence=evidence,
     )
     _record(d)
-    return {"ok": True, "kind": kind, "token": token, "evidence": evidence}
+
+    # Everything else that independently verified, so the agent can mention the
+    # text and the calendar entry without making a second claim for each.
+    also = {k: list(v) for k, v in ledger.verified.items() if k != kind}
+    return {"ok": True, "kind": kind, "token": token, "evidence": evidence, "also_verified": also}
 
 
 def report(ledger: Ledger) -> str:
