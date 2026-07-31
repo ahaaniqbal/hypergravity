@@ -35,6 +35,10 @@ from pipecat.transports.base_transport import BaseTransport
 from pipecat.turns.user_stop.turn_analyzer_user_turn_stop_strategy import (
     TurnAnalyzerUserTurnStopStrategy,
 )
+from pipecat.turns.user_turn_strategies import (
+    UserTurnStrategies,
+    default_user_turn_start_strategies,
+)
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 from pipecat.workers.runner import WorkerRunner
 
@@ -144,13 +148,16 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
         context,
         user_params=LLMUserAggregatorParams(
             vad_analyzer=SileroVADAnalyzer(),
-            # The analyzer is passed through a stop *strategy*, not directly —
-            # LLMUserAggregatorParams takes no turn_analyzer argument, and passing
-            # one raises only when the pipeline is built, so the bot imports
-            # cleanly and then dies the moment a call arrives.
-            user_turn_strategies=[
-                TurnAnalyzerUserTurnStopStrategy(turn_analyzer=turn_analyzer),
-            ],
+            # A UserTurnStrategies pair, not a bare list. The controller reads
+            # .start and .stop off it, so a list raised "'list' object has no
+            # attribute 'start'" on every single utterance: the greeting played
+            # (straight to TTS) and then the agent could not process a word the
+            # caller said. Keeping the default start strategies matters too —
+            # replacing them would break barge-in detection entirely.
+            user_turn_strategies=UserTurnStrategies(
+                start=default_user_turn_start_strategies(),
+                stop=[TurnAnalyzerUserTurnStopStrategy(turn_analyzer=turn_analyzer)],
+            ),
             # Off by default, which leaves both sides sitting in silence when a
             # caller pauses to think. On a phone that reads as a dead line.
             user_idle_timeout=IDLE_SECONDS,
