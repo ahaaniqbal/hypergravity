@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import shutil
 from typing import Any
 
@@ -181,6 +182,102 @@ async def click_in_app(app: str, what: str) -> str:
     except MacError as e:
         return f"Found it in {app} but the click failed: {e}"
     return f"Clicked '{what}' in {app}. What I found: {found[:200]}"
+
+
+async def use_app(app: str, actions: list[dict[str, Any]]) -> str:
+    """Drive any Mac app: a short plan of menu picks, clicks, typing and keys.
+
+    Written around *labels and menu paths* rather than element ids, because the
+    caller is speaking. Resolving "the Send button" to an accessibility id is our
+    job, not something to make a model guess at over the phone.
+
+    Menu paths are the workhorse. Most real commands live in a menu, and
+    ``click_menu_item`` reaches them by name without opening anything visually —
+    no element lookup, no coordinates, and it works in apps whose accessibility
+    tree is otherwise sparse.
+
+    Batched into one call: each round trip is a second of silence on a live call,
+    and a four-step task done one step at a time is four seconds of nothing.
+    """
+    s = session()
+    if not actions:
+        return "No actions given."
+
+    # open_app only activates something already running — a closed app stays
+    # closed and every later step quietly does nothing. The shell opener starts
+    # it for real, the same way Calendar and Safari need.
+    proc = await asyncio.create_subprocess_exec(
+        "open", "-a", app,
+        stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE,
+    )
+    _, err = await proc.communicate()
+    if proc.returncode != 0:
+        return f"Couldn't open {app}: {(err or b'').decode().strip()[:120]}. Nothing was done."
+    await asyncio.sleep(1.5)
+
+    try:
+        await s.call("open_app", app=app, activate=True)
+    except MacError as e:
+        return f"{app} wouldn't come to the front: {e}. Nothing was done."
+
+    steps: list[dict[str, Any]] = []
+    described: list[str] = []
+
+    for act in actions[:10]:  # batch caps at 10
+        if path := act.get("menu"):
+            steps.append({"tool": "click_menu_item", "path": path, "include_state": False})
+            described.append(f"menu {path}")
+        elif label := act.get("click"):
+            hit = await s.call("find", app=app, query=label, max_results=1)
+            eid = _first_element_id(hit)
+            if not eid:
+                return f"Couldn't find '{label}' in {app}. Nothing was done."
+            steps.append({"tool": "click", "element_id": eid, "include_state": False})
+            described.append(f"click {label}")
+        elif (text := act.get("type")) is not None:
+            steps.append({"tool": "type_text", "text": str(text), "include_state": False})
+            described.append("typed")
+        elif key := act.get("key"):
+            steps.append({"tool": "press_key", "key": key, "include_state": False})
+            described.append(key)
+
+    if steps:
+        try:
+            result = await s.call("batch", app=app, actions=steps, include_screenshot=False)
+        except MacError as e:
+            done = ", ".join(described)
+            return f"Got as far as [{done}] then {app} refused: {e}"
+
+        # The batch can return without raising and still have done nothing —
+        # an app that isn't really there answers APP_NOT_FOUND in the body.
+        # Reporting the plan as though it ran is precisely the fabrication this
+        # build exists to prevent, so treat any such reply as a failure.
+        if _looks_like_failure(result):
+            return f"NOTHING HAPPENED in {app} — {result.strip()[:200]}"
+
+    # Read back the app's actual state, so we report what happened rather than
+    # what we intended.
+    try:
+        after = await s.call("get_app_state", app=app, include_screenshot=False, max_elements=60)
+    except MacError:
+        after = ""
+    if _looks_like_failure(after):
+        return f"NOTHING HAPPENED in {app} — {after.strip()[:200]}"
+
+    return f"Did [{', '.join(described)}] in {app}.\n\n{after[:1200]}"
+
+
+_FAILURE_MARKERS = ("APP_NOT_FOUND", "is not running", "NOT_FOUND", "no windows")
+
+
+def _looks_like_failure(text: str) -> bool:
+    return any(marker in (text or "") for marker in _FAILURE_MARKERS)
+
+
+def _first_element_id(found: str) -> str | None:
+    """Pull an element id out of find()'s text output."""
+    match = re.search(r"\b(?:id|element_id)[=:\s]+([A-Za-z0-9_\-]+)", found)
+    return match.group(1) if match else None
 
 
 async def act_on_mac(instruction: str, app: str = "") -> str:

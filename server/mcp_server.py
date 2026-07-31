@@ -31,6 +31,7 @@ from agent.gate import FabricationBlocked, claim_success, report  # noqa: E402
 from agent.ledger import StepState, open_task  # noqa: E402
 from agent.mac_calendar import CalendarError, add_verified_event  # noqa: E402
 from agent.background import running_jobs, start as start_background  # noqa: E402
+from agent.mac_agent import use_app as mac_use_app  # noqa: E402
 from agent.mac_control import run as mac_run, tell_app as mac_tell_app  # noqa: E402
 from agent.web import WebError, browse, look_up  # noqa: E402
 
@@ -163,6 +164,31 @@ async def run_on_mac(command: str, cwd: str = "") -> str:
         return f"FAILED (exit {r.get('exit_code')}) — {r.get('output') or r.get('reason')}"
     led.mark(label, StepState.DONE)
     return str(r.get("output"))
+
+
+@mcp.tool()
+async def use_mac_app(app: str, actions: list) -> str:
+    """Do something in any Mac app — Notes, Mail, Slack, Figma, anything.
+
+    Give a short plan; it runs in one go. Menu paths are the most reliable:
+    most commands live in a menu and need no hunting for a button.
+
+    Args:
+        app: App name, e.g. "Notes".
+        actions: In order, each one of {"menu": "File > New Note"},
+            {"click": "visible label"}, {"type": "text"}, {"key": "cmd+s"}.
+    """
+    led = _ledger()
+    label = f"{app}: {str(actions[0])[:26]}" if actions else app
+    led.mark(label, StepState.PENDING)
+    try:
+        result = await mac_use_app(app, actions)
+    except Exception as e:  # noqa: BLE001
+        led.mark(label, StepState.FAILED, str(e)[:60])
+        return f"FAILED — {e}"
+    worked = result.startswith("Did [")
+    led.mark(label, StepState.DONE if worked else StepState.FAILED)
+    return result
 
 
 @mcp.tool()

@@ -23,7 +23,7 @@ from .counterparty import Counterparty, CounterpartyError
 from .gate import FabricationBlocked, claim_success, report
 from .ledger import Ledger, StepState
 from .mac_calendar import CalendarError, add_verified_event
-from .mac_agent import click_in_app as mac_click
+from .mac_agent import use_app as mac_use_app
 from .mac_control import run as mac_run, tell_app as mac_tell_app
 from .web import WebError, browse, look_up
 
@@ -335,30 +335,38 @@ def build_tools(ledger: Ledger, cp: Counterparty) -> tuple[ToolsSchema, dict[str
         )
 
 
-    async def click_in_any_app(params: FunctionCallParams) -> None:
+    async def use_mac_app(params: FunctionCallParams) -> None:
         a = params.arguments
         app = str(a.get("app", "")).strip()
-        what = str(a.get("what", "")).strip()
-        if not app or not what:
-            await params.result_callback({"error": "need an app and what to click"})
+        actions = a.get("actions") or []
+        if isinstance(actions, str):
+            try:
+                actions = json.loads(actions)
+            except json.JSONDecodeError:
+                await params.result_callback({"error": "actions must be a list"})
+                return
+        if not app or not actions:
+            await params.result_callback({"error": "need an app and at least one action"})
             return
-        label = f"click {what[:20]} in {app}"
+
+        label = f"{app}: {str(actions[0])[:26]}"
         ledger.mark(label, StepState.PENDING)
         try:
-            result = await mac_click(app, what)
+            result = await mac_use_app(app, actions)
         except Exception as e:  # noqa: BLE001
             ledger.mark(label, StepState.FAILED, str(e)[:60])
             await params.result_callback({"ok": False, "reason": str(e)})
             return
-        clicked = result.startswith("Clicked")
-        ledger.mark(label, StepState.DONE if clicked else StepState.FAILED)
+
+        worked = result.startswith("Did [")
+        ledger.mark(label, StepState.DONE if worked else StepState.FAILED)
         await params.result_callback(
             {
-                "ok": clicked,
+                "ok": worked,
                 "result": result,
                 "instruction": (
-                    "If ok is false nothing was clicked — say so rather than describing "
-                    "what the click would have done."
+                    "If ok is false NOTHING happened — say so rather than describing "
+                    "what the steps would have done."
                 ),
             }
         )
@@ -532,14 +540,25 @@ def build_tools(ledger: Ledger, cp: Counterparty) -> tuple[ToolsSchema, dict[str
             handler=run_on_mac,
         ),
         FunctionSchema(
-            name="click_in_any_app",
-            description='Click something in an app with no AppleScript support.',
+            name="use_mac_app",
+            description=(
+                "Do something in any Mac app — Notes, Mail, Slack, Figma, anything. "
+                "Give a short plan; it runs in one go. Menu paths are the most "
+                "reliable: most commands live in a menu and need no hunting."
+            ),
             properties={
-                "app": {"type": "string", "description": "App name, e.g. 'Comet'."},
-                "what": {"type": "string", "description": "The button or menu, in words."},
+                "app": {"type": "string", "description": "App name, e.g. 'Notes'."},
+                "actions": {
+                    "type": "array",
+                    "description": (
+                        'In order, each one of: {"menu": "File > New Note"}, '
+                        '{"click": "visible label"}, {"type": "text"}, {"key": "cmd+s"}.'
+                    ),
+                    "items": {"type": "object"},
+                },
             },
-            required=["app", "what"],
-            handler=click_in_any_app,
+            required=["app", "actions"],
+            handler=use_mac_app,
         ),
         FunctionSchema(
             name="control_app",
