@@ -32,7 +32,7 @@ from agent.ledger import StepState, open_task  # noqa: E402
 from agent.mac_calendar import CalendarError, add_verified_event  # noqa: E402
 from agent.background import start as start_background  # noqa: E402
 from agent.mac_control import run as mac_run, tell_app as mac_tell_app  # noqa: E402
-from agent.web import WebError, look_up  # noqa: E402
+from agent.web import WebError, browse, look_up  # noqa: E402
 
 TASK_ID = os.getenv("TASK_ID", "hypergravity-live")
 
@@ -76,6 +76,30 @@ async def _unused_look_up_on_the_web(query: str) -> str:
         led.mark(f"look up: {query[:38]}", StepState.FAILED, str(e))
         return f"COULD NOT READ THE PAGE — {e}. Do not guess what it said."
     led.mark(f"look up: {query[:38]}", StepState.DONE)
+    return page
+
+
+@mcp.tool()
+async def browse_the_web(steps: list) -> str:
+    """Browse in several steps when one page isn't enough.
+
+    Click into a result, follow a link, fill a search box, then read where you
+    landed. All steps run in one go.
+
+    Args:
+        steps: In order. Each is one of {"go": "https://…"},
+            {"click": "visible text"}, {"type": {"into": "label", "text": "…"}},
+            {"wait": seconds}. Start with a go.
+    """
+    led = _ledger()
+    label = f"browse: {str(steps[0])[:34]}" if steps else "browse"
+    led.mark(label, StepState.PENDING)
+    try:
+        page = await browse(steps)
+    except WebError as e:
+        led.mark(label, StepState.FAILED, str(e))
+        return f"COULDN'T DO THAT — {e}. Don't guess what the page said."
+    led.mark(label, StepState.DONE)
     return page
 
 

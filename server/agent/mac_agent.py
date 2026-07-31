@@ -120,7 +120,12 @@ def session() -> MacSession:
 
 
 async def available() -> tuple[bool, str]:
-    """Whether the Mac can actually be driven, and why not if it can't."""
+    """Whether the Mac can actually be driven, and why not if it can't.
+
+    Only Accessibility is required. It carries reading the UI tree, clicking and
+    typing — everything we actually do. Screen Recording adds screenshots, which
+    we never take, so demanding it turned a working setup into a refusal.
+    """
     if not shutil.which(BINARY) and not os.path.exists(BINARY):
         return False, "computer-use-mcp is not installed"
     proc = await asyncio.create_subprocess_exec(
@@ -129,14 +134,12 @@ async def available() -> tuple[bool, str]:
     )
     out, _ = await proc.communicate()
     report = out.decode()
-    if "NOT GRANTED" in report:
-        missing = [
-            line.split(":")[0].strip()
-            for line in report.splitlines()
-            if "NOT GRANTED" in line
-        ]
-        return False, f"macOS permissions not granted: {', '.join(missing)}"
-    return True, "ready"
+    for line in report.splitlines():
+        if line.strip().startswith("Accessibility:"):
+            if "NOT GRANTED" in line:
+                return False, "Accessibility is not granted in System Settings"
+            return True, "ready"
+    return False, "could not read permission status"
 
 
 # -- the verbs the orchestrator gets --------------------------------------
@@ -160,6 +163,24 @@ async def read_from_mac(app: str = "") -> str:
         # read_text is picky about which app is addressable; the app state dump
         # is coarser but almost always available.
         return await s.call("get_app_state", app=app) if app else await s.call("get_app_state")
+
+
+async def click_in_app(app: str, what: str) -> str:
+    """Click something in an app that has no AppleScript dictionary.
+
+    Resolves ``what`` against the accessibility tree, so no coordinates and no
+    screenshots — it survives window moves and needs only the Accessibility
+    grant. Reports honestly when nothing matched rather than clicking at random.
+    """
+    s = session()
+    found = await s.call("find", app=app, query=what)
+    if "No elements match" in found or not found.strip():
+        return f"Nothing in {app} matches '{what}' — I did not click anything."
+    try:
+        await s.call("click", app=app, query=what)
+    except MacError as e:
+        return f"Found it in {app} but the click failed: {e}"
+    return f"Clicked '{what}' in {app}. What I found: {found[:200]}"
 
 
 async def act_on_mac(instruction: str, app: str = "") -> str:

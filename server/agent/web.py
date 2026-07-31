@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import re
 import subprocess
+from typing import Any
 from urllib.parse import quote_plus
 
 from loguru import logger
@@ -81,6 +82,99 @@ async def _harness(script: str) -> str:
         proc.kill()
         raise WebError("the page took too long to load") from None
     return out.decode(errors="replace")
+
+
+def _steps_script(steps: list[dict[str, Any]]) -> str:
+    """Compile a plan into one browser-harness script.
+
+    Deliberately one round trip for the whole sequence. Driving this a step at a
+    time would put a second of phone silence between every click, which is the
+    difference between an assistant that feels quick and one that feels broken.
+    """
+    lines = [
+        "import time, json",
+        "log = []",
+        "def _say(m): log.append(m)",
+    ]
+    opened = False
+    for step in steps:
+        if url := step.get("go"):
+            fn = "new_tab" if not opened else "goto_url"
+            opened = True
+            lines += [
+                f"{fn}({url!r})",
+                "wait_for_load()",
+                "try: wait_for_network_idle(timeout=8)",
+                "except Exception: pass",
+                f"_say('opened {url}')",
+            ]
+        elif text := step.get("click"):
+            # Match on visible text through the DOM: no coordinates to go stale,
+            # and it survives the layout shifts that break pixel clicks.
+            lines += [
+                f"_t = {text!r}",
+                """_hit = js('''(() => {
+                    const t = %s.toLowerCase();
+                    const els = [...document.querySelectorAll('a,button,[role=button],[role=link],input[type=submit]')];
+                    const el = els.find(e => (e.innerText||e.value||'').trim().toLowerCase().includes(t));
+                    if (!el) return null;
+                    el.scrollIntoView({block:'center'});
+                    el.click();
+                    return (el.innerText||el.value||'').trim().slice(0,80);
+                })()''' % json.dumps(_t))""",
+                "time.sleep(3)",
+                "try: wait_for_network_idle(timeout=8)",
+                "except Exception: pass",
+                "_say(('clicked ' + _hit) if _hit else ('could not find anything to click matching: ' + _t))",
+            ]
+        elif typing := step.get("type"):
+            into = str(typing.get("into", ""))
+            value = str(typing.get("text", ""))
+            lines += [
+                f"try:\n    fill_input({into!r}, {value!r}); _say('typed into {into}')",
+                f"except Exception as e:\n    _say('could not type into {into}: ' + str(e))",
+            ]
+        elif seconds := step.get("wait"):
+            lines += [f"time.sleep(min({float(seconds)}, 15))", f"_say('waited {seconds}s')"]
+
+    lines += [
+        f"time.sleep({SETTLE_SECONDS})",
+        "print('===LOG===')",
+        "print(' | '.join(log))",
+        "print('===TITLE===')",
+        "print(js('document.title'))",
+        "print('===TEXT===')",
+        "try: print(js('document.body.innerText'))",
+        "except Exception: print('')",
+    ]
+    return "\n".join(lines)
+
+
+async def browse(steps: list[dict[str, Any]]) -> str:
+    """Run a short plan in the user's Chrome and read the final page.
+
+    Steps are ``{"go": url}``, ``{"click": "visible text"}``,
+    ``{"type": {"into": "label", "text": "..."}}``, ``{"wait": seconds}``.
+    """
+    if not steps:
+        raise WebError("no steps given")
+    logger.info(f"browse plan: {steps}")
+
+    raw = await _harness(_steps_script(steps))
+    if "===TEXT===" not in raw:
+        raise WebError(raw.strip()[-300:] or "the browser returned nothing")
+
+    trace = raw.partition("===LOG===")[2].partition("===TITLE===")[0].strip()
+    head, _, body = raw.partition("===TEXT===")
+    title_lines = head.partition("===TITLE===")[2].strip().splitlines()
+    title = title_lines[0] if title_lines else "(untitled)"
+
+    body = re.sub(r"\n{2,}", "\n", body).strip()
+    body = re.sub(r"[ \t]{2,}", " ", body)
+    if len(body) > MAX_TEXT:
+        body = body[:MAX_TEXT] + "\n…[truncated]"
+
+    return f"WHAT I DID: {trace}\n\nPAGE: {title}\n\n{body or '(the page had no readable text)'}"
 
 
 async def look_up(query_or_url: str) -> str:

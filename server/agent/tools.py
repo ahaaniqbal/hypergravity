@@ -14,6 +14,7 @@ from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.services.llm_service import FunctionCallParams
 
+import json
 import os
 
 from .background import start as start_background
@@ -21,8 +22,9 @@ from .counterparty import Counterparty, CounterpartyError
 from .gate import FabricationBlocked, claim_success, report
 from .ledger import Ledger, StepState
 from .mac_calendar import CalendarError, add_verified_event
+from .mac_agent import click_in_app as mac_click
 from .mac_control import run as mac_run, tell_app as mac_tell_app
-from .web import WebError, look_up
+from .web import WebError, browse, look_up
 
 
 MY_PHONE = os.getenv("MY_PHONE", "")
@@ -273,6 +275,76 @@ def build_tools(ledger: Ledger, cp: Counterparty) -> tuple[ToolsSchema, dict[str
             }
         )
 
+    async def browse_the_web(params: FunctionCallParams) -> None:
+        steps = params.arguments.get("steps") or []
+        if isinstance(steps, str):
+            try:
+                steps = json.loads(steps)
+            except json.JSONDecodeError:
+                await params.result_callback({"error": "steps must be a list"})
+                return
+        if not steps:
+            await params.result_callback({"error": "no steps given"})
+            return
+
+        label = f"browse: {str(steps[0])[:34]}"
+        ledger.mark(label, StepState.PENDING)
+        try:
+            page = await browse(steps)
+        except WebError as e:
+            ledger.mark(label, StepState.FAILED, str(e))
+            await params.result_callback(
+                {
+                    "ok": False,
+                    "reason": str(e),
+                    "instruction": "Say what went wrong. Do not guess what the page said.",
+                }
+            )
+            return
+
+        ledger.mark(label, StepState.DONE)
+        await params.result_callback(
+            {
+                "ok": True,
+                "page": page,
+                "instruction": (
+                    "'WHAT I DID' is the steps that actually ran — if one says it could "
+                    "not find something, that step did not happen, so do not describe it "
+                    "as though it did. Answer from the page text in one or two spoken "
+                    "sentences. You have only READ this."
+                ),
+            }
+        )
+
+
+    async def click_in_any_app(params: FunctionCallParams) -> None:
+        a = params.arguments
+        app = str(a.get("app", "")).strip()
+        what = str(a.get("what", "")).strip()
+        if not app or not what:
+            await params.result_callback({"error": "need an app and what to click"})
+            return
+        label = f"click {what[:20]} in {app}"
+        ledger.mark(label, StepState.PENDING)
+        try:
+            result = await mac_click(app, what)
+        except Exception as e:  # noqa: BLE001
+            ledger.mark(label, StepState.FAILED, str(e)[:60])
+            await params.result_callback({"ok": False, "reason": str(e)})
+            return
+        clicked = result.startswith("Clicked")
+        ledger.mark(label, StepState.DONE if clicked else StepState.FAILED)
+        await params.result_callback(
+            {
+                "ok": clicked,
+                "result": result,
+                "instruction": (
+                    "If ok is false nothing was clicked — say so rather than describing "
+                    "what the click would have done."
+                ),
+            }
+        )
+
     # -- work that outlives the call ------------------------------------------
 
     async def work_in_background(params: FunctionCallParams) -> None:
@@ -407,6 +479,29 @@ def build_tools(ledger: Ledger, cp: Counterparty) -> tuple[ToolsSchema, dict[str
             handler=look_up_on_the_web,
         ),
         FunctionSchema(
+            name="browse_the_web",
+            description=(
+                "Browse properly, in several steps, when one page isn't enough — click "
+                "into a result, follow a link, fill a search box, then read where you "
+                "landed. Use this over look_up_on_the_web whenever the answer is a hop "
+                "or two past the first page. All the steps run in one go."
+            ),
+            properties={
+                "steps": {
+                    "type": "array",
+                    "description": (
+                        "In order. Each is one of: {\"go\": \"https://…\"}, "
+                        "{\"click\": \"visible text on the link or button\"}, "
+                        "{\"type\": {\"into\": \"field label\", \"text\": \"…\"}}, "
+                        "{\"wait\": seconds}. Start with a go."
+                    ),
+                    "items": {"type": "object"},
+                },
+            },
+            required=["steps"],
+            handler=browse_the_web,
+        ),
+        FunctionSchema(
             name="work_in_background",
             description=(
                 "Start something that takes a while and TEXT the caller when it's done, "
@@ -440,6 +535,21 @@ def build_tools(ledger: Ledger, cp: Counterparty) -> tuple[ToolsSchema, dict[str
             },
             required=["command"],
             handler=run_on_mac,
+        ),
+        FunctionSchema(
+            name="click_in_any_app",
+            description=(
+                "Click something in a Mac app that has no AppleScript support — Comet, "
+                "Granola, ChatGPT, Figma and the like. Works off the accessibility tree, "
+                "so describe the button or menu in words. Try control_app first for "
+                "Mail, Notes, Messages, Finder, Numbers: those script properly."
+            ),
+            properties={
+                "app": {"type": "string", "description": "App name, e.g. 'Comet'."},
+                "what": {"type": "string", "description": "The button or menu, in words."},
+            },
+            required=["app", "what"],
+            handler=click_in_any_app,
         ),
         FunctionSchema(
             name="control_app",
