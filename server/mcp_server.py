@@ -115,7 +115,9 @@ async def build_it_and_text_me(request: str, app: str = "Claude", notify: str = 
     is never composed, so there is no version of this that invents one.
 
     Args:
-        request: The full request, as you'd type it to another agent.
+        request: The WHOLE brief — what to build, for whom, and every
+            detail the caller gave. The other agent cannot hear the call
+            and cannot ask questions, so write it out in full.
         app: Which app. Defaults to Claude.
         notify: Number to text; defaults to MY_PHONE.
     """

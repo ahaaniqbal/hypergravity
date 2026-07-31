@@ -34,6 +34,27 @@ POLL_SECONDS = 20
 DEFAULT_DEADLINE = 12 * 60
 
 
+async def _was_submitted(app: str, request: str) -> bool:
+    """Did the message actually go, or is it still sitting in the input box?
+
+    Checked by looking for a distinctive chunk of our own text in an editable
+    field. Once sent, the box empties and the words move into the transcript, so
+    finding them still in an input means nothing was submitted.
+    """
+    await asyncio.sleep(2)
+    state = await _visible_text(app)
+    if not state:
+        return True  # can't tell; don't block on a reading we didn't get
+
+    probe = " ".join(request.split()[:6]).lower()
+    for line in state.splitlines():
+        lowered = line.lower()
+        editable = any(k in line for k in ("AXTextArea", "AXTextField", "AXComboBox"))
+        if editable and probe and probe in lowered:
+            return False
+    return True
+
+
 async def _visible_text(app: str) -> str:
     try:
         return await session().call(
@@ -81,6 +102,20 @@ async def ask_app_and_watch(
     )
     if not result.startswith("Did ["):
         return f"Couldn't hand that to {app} — {result[:150]}"
+
+    # Delivering the keystroke is not the same as sending the message. The first
+    # version reported success on the strength of "we pressed Return", then sat
+    # watching for a URL from a request still sitting unsent in the box. If our
+    # text is still on screen, it did not go.
+    if not await _was_submitted(app, request):
+        logger.warning(f"{app}: request typed but not sent — retrying submit")
+        await session().call("press_key", app=app, key="enter", include_state=False)
+        await asyncio.sleep(2)
+        if not await _was_submitted(app, request):
+            return (
+                f"I typed it into {app} but couldn't get it to send — the message "
+                "is sitting in the box. Press return on it and I'll pick it up."
+            )
 
     logger.info(f"delegated to {app}, watching for a link: {request[:60]}")
     started = time.time()

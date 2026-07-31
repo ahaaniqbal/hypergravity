@@ -669,7 +669,13 @@ def build_tools(ledger: Ledger, cp: Counterparty) -> tuple[ToolsSchema, dict[str
             properties={
                 "request": {
                     "type": "string",
-                    "description": "The full request, written out as you'd type it to another agent.",
+                    "description": (
+                        "The WHOLE brief, written out as you'd type it to another "
+                        "engineer — what to build, for whom, every detail the caller "
+                        "gave you (names, dates, times, style). Several sentences. "
+                        "The other agent cannot hear the call and cannot ask you "
+                        "anything, so a vague line produces a vague result."
+                    ),
                 },
                 "app": {"type": "string", "description": "Which app. Defaults to Claude."},
                 "notify": {"type": "string", "description": "Number to text; defaults to the caller."},
