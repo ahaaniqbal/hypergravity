@@ -44,7 +44,16 @@ FRAME_BYTES = 160          # 20 ms of 8 kHz mu-law
 FRAME_SECONDS = 0.02
 SILENCE = b"\xff" * FRAME_BYTES  # mu-law zero, not 0x00
 MAX_CALL_SECONDS = float(os.getenv("HG_OUTBOUND_MAX_SECONDS", "300"))
-JITTER_MAX_FRAMES = 100    # ~2s; beyond this we are behind and should drop
+# Generous on purpose. TTS hands us a whole utterance far faster than the 20 ms
+# per frame the wire drains it at, so the queue legitimately holds the entire
+# sentence. An earlier 2-second cap silently dropped the tail of anything longer
+# — the bot appeared to stop talking mid-thought. This only exists to stop
+# unbounded growth if something upstream goes haywire; 160 bytes a frame makes
+# a minute of buffer cost nothing.
+JITTER_MAX_FRAMES = 3000   # ~60s
+# How long after the bot finishes to keep ignoring the line. Covers the round
+# trip plus whatever the handset's speaker leaks back into its own microphone.
+ECHO_TAIL = float(os.getenv("HG_ECHO_TAIL", "0.6"))
 
 # What the agent should open the call with, keyed by the stream id we invent for
 # it. bot.py reads this when a session starts and finds an outbound stream id.
@@ -73,8 +82,20 @@ def _rtp_payload(packet: bytes) -> bytes | None:
     return packet[offset:] or None
 
 
-async def _pump_to_bot(call: sip.SipCall, ws, stop: asyncio.Event) -> None:
-    """Caller's voice: RTP in → base64 → the bot's WebSocket."""
+async def _pump_to_bot(call: sip.SipCall, ws, stop: asyncio.Event, floor: dict) -> None:
+    """Caller's voice: RTP in → base64 → the bot's WebSocket.
+
+    Deaf while the bot is talking, which is not an optimisation — it is the only
+    thing that makes an originated call usable. An inbound call arrives through
+    Telnyx's own media path; a call we place is a bare SIP endpoint with no echo
+    cancellation anywhere in it, so the bot's voice comes back down the line and
+    its own STT transcribes it. It then hears "someone" talking, interrupts
+    itself half a second into the greeting, and does it again on every turn — the
+    caller hears "Hi" and then a line that never says anything else.
+
+    Half-duplex costs barge-in on outbound calls only. That is the right trade:
+    a conversation you can have beats one you can interrupt.
+    """
     loop = asyncio.get_running_loop()
     while not stop.is_set():
         try:
@@ -83,6 +104,8 @@ async def _pump_to_bot(call: sip.SipCall, ws, stop: asyncio.Event) -> None:
             continue
         except (OSError, asyncio.CancelledError):
             break
+        if time.monotonic() < floor["until"]:
+            continue  # our own voice on its way back
         payload = _rtp_payload(packet)
         if not payload:
             continue
@@ -96,7 +119,7 @@ async def _pump_to_bot(call: sip.SipCall, ws, stop: asyncio.Event) -> None:
     stop.set()
 
 
-async def _pump_to_caller(call: sip.SipCall, ws, stop: asyncio.Event) -> None:
+async def _pump_to_caller(call: sip.SipCall, ws, stop: asyncio.Event, floor: dict) -> None:
     """The agent's voice: the bot's WebSocket → base64 → RTP out.
 
     Reading and sending are deliberately split. The bot emits audio in bursts as
@@ -120,6 +143,12 @@ async def _pump_to_caller(call: sip.SipCall, ws, stop: asyncio.Event) -> None:
                         frame += SILENCE[len(frame):]
                     if queue.qsize() < JITTER_MAX_FRAMES:
                         queue.put_nowait(frame)
+                # Hold the floor until everything queued has actually played out,
+                # plus a tail for the round trip back. Measured off the queue
+                # rather than the WebSocket, because TTS arrives in bursts far
+                # faster than 20 ms per frame.
+                playout = queue.qsize() * FRAME_SECONDS
+                floor["until"] = max(floor["until"], time.monotonic() + playout + ECHO_TAIL)
         except Exception:  # noqa: BLE001
             pass
         finally:
@@ -172,6 +201,9 @@ async def call_and_say(to: str, opening: str, task_id: str = "") -> bool:
     events.step("calling you back", "pending", opening[:60])
 
     stop = asyncio.Event()
+    # Shared between the two pumps: the wall-clock time until which the line
+    # belongs to the bot and anything arriving on it is our own echo.
+    floor = {"until": 0.0}
     ws = None
     try:
         ws = await websockets.connect(BOT_WS, max_size=None)
@@ -190,8 +222,8 @@ async def call_and_say(to: str, opening: str, task_id: str = "") -> bool:
         }))
         await asyncio.wait_for(
             asyncio.gather(
-                _pump_to_bot(call, ws, stop),
-                _pump_to_caller(call, ws, stop),
+                _pump_to_bot(call, ws, stop, floor),
+                _pump_to_caller(call, ws, stop, floor),
             ),
             timeout=MAX_CALL_SECONDS,
         )
