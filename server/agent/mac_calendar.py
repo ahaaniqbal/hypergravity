@@ -27,14 +27,55 @@ class CalendarError(RuntimeError):
     pass
 
 
+_ensured = False
+
+
+async def _ensure_calendar_running() -> None:
+    """Start Calendar via the shell before scripting it.
+
+    AppleScript's own ``launch`` cannot cold-start it — a closed Calendar returns
+    -600 "Application isn't running" no matter what the tell block says. The
+    shell opener does start it, and once it is up the scripting dictionary works
+    normally. Same trick Safari needs.
+    """
+    global _ensured
+    if _ensured:
+        return
+    proc = await asyncio.create_subprocess_exec(
+        "open", "-a", "Calendar",
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    await proc.wait()
+    await asyncio.sleep(2.0)
+    _ensured = True
+
+
+OSASCRIPT_TIMEOUT = 12.0
+
+
 async def _osascript(script: str) -> str:
+    """Run AppleScript with a hard timeout.
+
+    The first Calendar write raises a macOS Automation consent dialog, and
+    osascript blocks on it until someone clicks. Without a timeout that stalls
+    the whole call — the caller hears nothing while a dialog they may not even
+    be looking at waits for a click.
+    """
     proc = await asyncio.create_subprocess_exec(
         "osascript", "-e", script,
         stdout=subprocess.PIPE, stderr=subprocess.PIPE,
     )
-    out, err = await proc.communicate()
+    try:
+        out, err = await asyncio.wait_for(proc.communicate(), timeout=OSASCRIPT_TIMEOUT)
+    except asyncio.TimeoutError:
+        proc.kill()
+        raise CalendarError(
+            "Calendar did not respond — macOS is probably asking for permission. "
+            "Approve it once and this will work from then on."
+        ) from None
     if proc.returncode != 0:
-        raise CalendarError((err or b"").decode().strip() or "osascript failed")
+        detail = (err or b"").decode().strip().splitlines()
+        raise CalendarError(detail[-1][:200] if detail else "osascript failed")
     return out.decode().strip()
 
 
@@ -42,6 +83,7 @@ async def create_event(
     title: str, hour: int, minute: int, notes: str = "", calendar: str = DEFAULT_CALENDAR
 ) -> str:
     """Create today's event and return its UID."""
+    await _ensure_calendar_running()
     # `launch` starts Calendar without bringing it to the front — without it the
     # script fails with -600 "Application isn't running" whenever the app is
     # closed, which on a demo machine is most of the time.
@@ -68,6 +110,7 @@ async def create_event(
 
 async def read_event(uid: str, calendar: str = DEFAULT_CALENDAR) -> dict[str, str] | None:
     """Independently re-read the event. None means it is not really there."""
+    await _ensure_calendar_running()
     script = f'''
     tell application "Calendar"
       launch

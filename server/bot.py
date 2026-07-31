@@ -16,8 +16,10 @@ import uuid
 
 from dotenv import load_dotenv
 from loguru import logger
+from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
+from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import LLMRunFrame
+from pipecat.frames.frames import LLMRunFrame, TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -92,6 +94,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
         settings=A1GatewayLLMService.Settings(
             model=MODEL,
             system_instruction=SYSTEM_INSTRUCTION,
+            # Every turn was spending 35-50 tokens on reasoning for what is
+            # essentially "pick a tool and say one sentence". Minimal effort
+            # keeps the tool choice while cutting time-to-first-word.
+            reasoning=A1GatewayLLMService.ReasoningConfig(effort="minimal"),
         ),
     )
 
@@ -106,9 +112,20 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
         )
 
     context = LLMContext(tools=tools_schema)
+
+    # Turn-taking is the single biggest cost on this call. The default smart-turn
+    # analyzer waits 3s of silence before believing the caller has finished, and
+    # measured on a real call that was roughly 60% of the delay — far more than
+    # the model itself. One second still lets people pause mid-sentence without
+    # being cut off, and takes two seconds off every single turn.
+    turn_analyzer = LocalSmartTurnAnalyzerV3(params=SmartTurnParams(stop_secs=1.0))
+
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
-        user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
+        user_params=LLMUserAggregatorParams(
+            vad_analyzer=SileroVADAnalyzer(),
+            turn_analyzer=turn_analyzer,
+        ),
     )
 
     pipeline = Pipeline(
@@ -152,11 +169,21 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
                     ),
                 }
             )
+            await worker.queue_frames([LLMRunFrame()])
         else:
-            context.add_message(
-                {"role": "developer", "content": "Greet the caller in one short sentence."}
+            # Speak a fixed opener straight to TTS. Asking the model to compose
+            # "Hi, it's HyperGravity" cost 2.4s of dead air on every answered
+            # call — the caller's first impression was silence. The line is the
+            # same every time, so there is nothing to generate.
+            await worker.queue_frames(
+                [TTSSpeakFrame("Hey, it's HyperGravity. What do you need?")]
             )
-        await worker.queue_frames([LLMRunFrame()])
+            context.add_message(
+                {
+                    "role": "assistant",
+                    "content": "Hey, it's HyperGravity. What do you need?",
+                }
+            )
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):

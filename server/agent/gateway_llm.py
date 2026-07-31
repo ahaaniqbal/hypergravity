@@ -19,6 +19,7 @@ sentences, which is what keeps this usable on a live call.
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 import httpx
@@ -34,6 +35,25 @@ _UNSUPPORTED = ("stream", "store", "include")
 # Tool results are presented as observed fact rather than as a tool message,
 # because this gateway drops the call_id that would otherwise bind them.
 _OBSERVED = "TOOL RESULT (already executed — do not call it again): "
+
+# Anything going into the context gets scrubbed first. A tool result carrying
+# control characters or a wall of page text is enough for the gateway to reject
+# the request — and because it stays in the history, it then rejects every turn
+# after it, which the caller hears as the same apology over and over.
+MAX_TOOL_RESULT = 1200
+_CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+# Measured against the live gateway: 12 KB passes, 16 KB is refused with
+# request_too_large. Sitting at 13 KB leaves headroom for the JSON envelope.
+BODY_LIMIT = 13 * 1024
+
+
+def _scrub(text: str) -> str:
+    text = _CONTROL.sub(" ", text)
+    text = text.replace(" ", " ").replace(" ", " ")
+    if len(text) > MAX_TOOL_RESULT:
+        text = text[:MAX_TOOL_RESULT] + " …[truncated]"
+    return text
 
 
 def flatten_input(items: list[Any]) -> list[dict[str, str]]:
@@ -66,7 +86,7 @@ def flatten_input(items: list[Any]) -> list[dict[str, str]]:
             output = item.get("output")
             if not isinstance(output, str):
                 output = json.dumps(output)
-            out.append({"role": "system", "content": f"{_OBSERVED}{output}"})
+            out.append({"role": "system", "content": f"{_OBSERVED}{_scrub(output)}"})
             continue
 
         role = item.get("role")
@@ -97,6 +117,44 @@ class A1GatewayLLMService(OpenAIResponsesHttpLLMService):
         self._gw_base = base_url.rstrip("/")
         self._gw_key = api_key
         self._http = httpx.AsyncClient(timeout=45.0)
+        self._consecutive_failures = 0
+
+    async def _apologise(self) -> None:
+        """Say something different each time.
+
+        Repeating one apology verbatim is how a stuck agent sounds — and it is
+        what the caller actually heard when a poisoned context failed every turn.
+        Varying it at least signals a real problem rather than a loop.
+        """
+        lines = [
+            "Sorry — I didn't catch that. Could you say it again?",
+            "I'm having trouble on my end. What was that?",
+            "Something's not working properly here. Say that once more?",
+            "I'm still struggling — it might be worth calling back in a moment.",
+        ]
+        idx = min(self._consecutive_failures - 1, len(lines) - 1)
+        await self._push_llm_text(lines[idx])
+
+    @staticmethod
+    def _drop_last_exchange(messages: list[Any]) -> list[dict[str, str]]:
+        """Remove the trailing tool results and the turn that produced them.
+
+        A tool result the gateway won't accept — an AppleScript error full of
+        control characters, say — sits in the history and fails every subsequent
+        request. Dropping back to the last clean user turn recovers the call.
+        """
+        cut = len(messages)
+        for i in range(len(messages) - 1, -1, -1):
+            item = messages[i]
+            role = item.get("role") if isinstance(item, dict) else None
+            content = str(item.get("content", "")) if isinstance(item, dict) else ""
+            if role == "system" and content.startswith(_OBSERVED):
+                cut = i
+                continue
+            if role == "user":
+                break
+            cut = min(cut, i)
+        return list(messages[:cut]) if cut < len(messages) else list(messages)
 
     async def _gateway_post(self, params: dict[str, Any]) -> dict[str, Any]:
         resp = await self._http.post(
@@ -144,8 +202,45 @@ class A1GatewayLLMService(OpenAIResponsesHttpLLMService):
         if instructions:
             messages = [{"role": "system", "content": instructions}, *messages]
 
-        params["input"] = messages
+        params["input"] = self._fit_budget(messages, params)
         return params
+
+    @staticmethod
+    def _fit_budget(messages: list[dict[str, str]], params: dict[str, Any]) -> list[dict[str, str]]:
+        """Drop the oldest turns until the whole request fits.
+
+        The gateway rejects anything over roughly 14 KB — small enough that the
+        system prompt and tool schemas alone take most of it. Without this, a
+        long call grows past the ceiling and then *stays* past it: every
+        subsequent turn fails identically and the caller hears the same apology
+        until they hang up. Trimming is the difference between a conversation
+        that forgets its beginning and one that dies.
+
+        The first message (system prompt) and the last (what was just said) are
+        never dropped.
+        """
+        overhead = len(json.dumps({k: v for k, v in params.items() if k != "input"}).encode())
+        room = BODY_LIMIT - overhead
+
+        def size(msgs: list[dict[str, str]]) -> int:
+            return len(json.dumps(msgs).encode())
+
+        if size(messages) <= room:
+            return messages
+
+        head, tail = messages[:1], messages[1:]
+        dropped = 0
+        while len(tail) > 1 and size(head + tail) > room:
+            tail.pop(0)
+            dropped += 1
+
+        # Still too big with one turn left: truncate that turn rather than fail.
+        if size(head + tail) > room and tail:
+            spare = max(400, room - size(head) - 200)
+            tail[-1] = {**tail[-1], "content": str(tail[-1].get("content", ""))[:spare]}
+
+        logger.warning(f"context over budget — dropped {dropped} older turns")
+        return head + tail
 
     async def _process_context(self, context: LLMContext) -> None:
         adapter = self.get_llm_adapter()
@@ -157,14 +252,34 @@ class A1GatewayLLMService(OpenAIResponsesHttpLLMService):
         await self.start_ttfb_metrics()
         try:
             body = await self._gateway_post(params)
+            self._consecutive_failures = 0
         except Exception as e:  # a dead gateway must not kill the call
-            logger.error(f"gateway call failed: {e}")
             await self.stop_ttfb_metrics()
-            await self._push_llm_text(
-                "Sorry — I lost my connection for a second there. Could you say that again?"
-            )
-            return
-        await self.stop_ttfb_metrics()
+            self._consecutive_failures += 1
+            logger.error(f"gateway call failed ({self._consecutive_failures}x): {e}")
+
+            # A rejection is usually the *history*, not the request: one bad tool
+            # result poisons every turn after it, and the caller hears the same
+            # apology forever. Retry once on a pruned context before giving up.
+            if self._consecutive_failures == 1:
+                pruned = dict(params)
+                pruned["input"] = self._drop_last_exchange(params.get("input") or [])
+                if len(pruned["input"]) < len(params.get("input") or []):
+                    try:
+                        body = await self._gateway_post(pruned)
+                        logger.warning("recovered by dropping the last exchange")
+                        self._consecutive_failures = 0
+                    except Exception:
+                        await self._apologise()
+                        return
+                else:
+                    await self._apologise()
+                    return
+            else:
+                await self._apologise()
+                return
+        else:
+            await self.stop_ttfb_metrics()
 
         function_calls: dict[str, dict[str, str]] = {}
         text_parts: list[str] = []

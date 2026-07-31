@@ -455,37 +455,8 @@ def build_tools(ledger: Ledger, cp: Counterparty) -> tuple[ToolsSchema, dict[str
 
     schemas = [
         FunctionSchema(
-            name="look_up_on_the_web",
-            description=(
-                "Look anything up in the user's own Chrome — logged in, on their screen — "
-                "and read back what the page actually says. Flights, prices, opening "
-                "hours, a menu, a dashboard. Use this whenever you are asked something "
-                "you do not already know. Reading a page is not acting on it."
-            ),
-            properties={
-                "query": {
-                    "type": "string",
-                    "description": (
-                        "What to search for, or a full URL. Write it the way a search "
-                        "box wants it, not the way it was spoken: for flights use airport "
-                        "codes and drop filler, so 'when's the latest flight from San "
-                        "Francisco to LA tomorrow' becomes 'flights from SFO to LAX "
-                        "tomorrow'. A precise query lands on the answer; a chatty one "
-                        "lands on a homepage."
-                    ),
-                },
-            },
-            required=["query"],
-            handler=look_up_on_the_web,
-        ),
-        FunctionSchema(
             name="browse_the_web",
-            description=(
-                "Browse properly, in several steps, when one page isn't enough — click "
-                "into a result, follow a link, fill a search box, then read where you "
-                "landed. Use this over look_up_on_the_web whenever the answer is a hop "
-                "or two past the first page. All the steps run in one go."
-            ),
+            description="Browse in the user's Chrome and read the page. Steps run in one go.",
             properties={
                 "steps": {
                     "type": "array",
@@ -503,12 +474,7 @@ def build_tools(ledger: Ledger, cp: Counterparty) -> tuple[ToolsSchema, dict[str
         ),
         FunctionSchema(
             name="work_in_background",
-            description=(
-                "Start something that takes a while and TEXT the caller when it's done, "
-                "so they can hang up. Use this the moment a task looks slower than a "
-                "person will hold the phone for — searching lots of files, a long build, "
-                "anything you'd otherwise make them wait through. Returns immediately."
-            ),
+            description='Start slow work and text the result, so the caller can hang up.',
             properties={
                 "what": {
                     "type": "string",
@@ -523,12 +489,7 @@ def build_tools(ledger: Ledger, cp: Counterparty) -> tuple[ToolsSchema, dict[str
         ),
         FunctionSchema(
             name="run_on_mac",
-            description=(
-                "Run a shell command on this Mac and read back what it printed. This is "
-                "how you do anything that is not a web page: inspect or edit files, run "
-                "or write code, use git, open an app with 'open -a', check the system. "
-                "Prefer one command that answers the question outright."
-            ),
+            description='Run a shell command and read its output. Files, code, git, opening apps.',
             properties={
                 "command": {"type": "string", "description": "The shell command."},
                 "cwd": {"type": "string", "description": "Directory to run it in, optional."},
@@ -538,12 +499,7 @@ def build_tools(ledger: Ledger, cp: Counterparty) -> tuple[ToolsSchema, dict[str
         ),
         FunctionSchema(
             name="click_in_any_app",
-            description=(
-                "Click something in a Mac app that has no AppleScript support — Comet, "
-                "Granola, ChatGPT, Figma and the like. Works off the accessibility tree, "
-                "so describe the button or menu in words. Try control_app first for "
-                "Mail, Notes, Messages, Finder, Numbers: those script properly."
-            ),
+            description='Click something in an app with no AppleScript support.',
             properties={
                 "app": {"type": "string", "description": "App name, e.g. 'Comet'."},
                 "what": {"type": "string", "description": "The button or menu, in words."},
@@ -553,12 +509,7 @@ def build_tools(ledger: Ledger, cp: Counterparty) -> tuple[ToolsSchema, dict[str
         ),
         FunctionSchema(
             name="control_app",
-            description=(
-                "Drive a Mac app through AppleScript — Mail, Notes, Messages, Music, "
-                "Finder, Numbers, Safari. Use this rather than the shell when the task "
-                "belongs to a specific app, because the scripting dictionary is a real "
-                "API. Pass only the body; the tell block is added for you."
-            ),
+            description='Drive a Mac app via AppleScript. Mail, Notes, Messages, Finder, Numbers.',
             properties={
                 "app": {"type": "string", "description": "App name, e.g. 'Notes'."},
                 "applescript": {
@@ -571,20 +522,14 @@ def build_tools(ledger: Ledger, cp: Counterparty) -> tuple[ToolsSchema, dict[str
         ),
         FunctionSchema(
             name="check_availability",
-            description=(
-                "List which reservation times the restaurant actually has free. "
-                "Call this before offering any time, and again after any refusal."
-            ),
+            description='Which reservation times are actually free. Call before offering any.',
             properties={},
             required=[],
             handler=check_availability,
         ),
         FunctionSchema(
             name="book_table",
-            description=(
-                "Attempt a reservation. This can fail — the slot may be taken. "
-                "The result tells you whether it truly landed; believe only that."
-            ),
+            description='Attempt a reservation. Can fail. Believe only what it returns.',
             properties={
                 "name": {"type": "string", "description": "Name the reservation is under."},
                 "party_size": {"type": "integer", "description": "Number of people."},
@@ -597,7 +542,7 @@ def build_tools(ledger: Ledger, cp: Counterparty) -> tuple[ToolsSchema, dict[str
         ),
         FunctionSchema(
             name="send_sms_confirmation",
-            description="Text the caller their confirmation. Only after a verified booking.",
+            description='Text the caller. Only after a verified booking.',
             properties={
                 "to": {"type": "string", "description": "Destination number, E.164."},
                 "body": {"type": "string", "description": "Short confirmation message."},
@@ -607,10 +552,7 @@ def build_tools(ledger: Ledger, cp: Counterparty) -> tuple[ToolsSchema, dict[str
         ),
         FunctionSchema(
             name="add_to_calendar",
-            description=(
-                "Put the confirmed booking in the caller's own Mac calendar. "
-                "Only after a verified booking."
-            ),
+            description='Add the confirmed booking to the Mac calendar.',
             properties={
                 "title": {"type": "string", "description": "Event title, e.g. 'Dinner for 2'."},
                 "time_slot": {"type": "string", "description": "Exact slot, e.g. '18:30'."},
@@ -621,12 +563,7 @@ def build_tools(ledger: Ledger, cp: Counterparty) -> tuple[ToolsSchema, dict[str
         ),
         FunctionSchema(
             name="claim_task_complete",
-            description=(
-                "The ONLY way to tell the caller the task is done. Call it ONCE, with the "
-                "booking id the restaurant issued. The text and the calendar entry are "
-                "covered by the same claim — never call this again for those. "
-                "If it returns allowed=false, report honestly instead."
-            ),
+            description='The ONLY way to say the task is done. Once, with the booking id.',
             properties={
                 "booking_id": {
                     "type": "string",
@@ -638,10 +575,7 @@ def build_tools(ledger: Ledger, cp: Counterparty) -> tuple[ToolsSchema, dict[str
         ),
         FunctionSchema(
             name="task_status",
-            description=(
-                "What is done, pending, and verified so far. Call this if you lose track, "
-                "are interrupted, or the caller returns on a different device."
-            ),
+            description="What's done, pending and verified. Use after an interruption.",
             properties={},
             required=[],
             handler=task_status,
