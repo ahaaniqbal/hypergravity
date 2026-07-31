@@ -27,8 +27,8 @@ from pipecat.processors.aggregators.llm_response_universal import (
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
+from pipecat.services.cartesia.stt import CartesiaSTTService
 from pipecat.services.cartesia.tts import CartesiaTTSService
-from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.transports.base_transport import BaseTransport
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 from pipecat.workers.runner import WorkerRunner
@@ -59,12 +59,23 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
     ledger = get_ledger(ACTIVE_TASK_ID)
     counterparty = Counterparty()
 
+    # Pill + judges' panel, served alongside the call from this same loop.
+    ui_server.start()
+
     call_data = getattr(runner_args, "call_data", None)
     if call_data and getattr(call_data, "from_number", None):
         ledger.caller_phone = call_data.from_number
         logger.info(f"caller: {ledger.caller_phone}")
 
-    stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
+    # Cartesia for both legs: Deepgram signup was down on the day, and Cartesia's
+    # Live STT runs on the key we already had. One vendor, one failure domain.
+    stt = CartesiaSTTService(
+        api_key=os.getenv("CARTESIA_API_KEY"),
+        settings=CartesiaSTTService.Settings(
+            model=os.getenv("CARTESIA_STT_MODEL", "ink-whisper"),
+            language="en",
+        ),
+    )
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
         settings=CartesiaTTSService.Settings(
