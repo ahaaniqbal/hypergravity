@@ -1,11 +1,12 @@
-# HyperGravity on VoiceOS — a five-minute walkthrough
+# HyperGravity on VoiceOS
 
-A custom MCP integration that gives VoiceOS four things it doesn't have natively:
-a **counterparty it can actually transact with**, a **real SMS channel**, **work
-that finishes after you've stopped talking**, and a **verification gate that
-refuses to claim success it can't evidence**.
+## The one sentence
 
-Everything below is spoken to VoiceOS. Nothing is typed.
+> VoiceOS is the best voice interface on a Mac. But it's *on* the Mac — walk away
+> and it can't reach you. We gave it a phone number, a voice that dials out, and a
+> conscience.
+
+Demo the boundary we removed, not the capabilities we added.
 
 ---
 
@@ -18,110 +19,128 @@ Settings → Integrations → Custom Integrations → Add
 | Name | `HyperGravity` |
 | Command | `/Users/ahaaniqbal/.local/bin/hypergravity-mcp` |
 
-> The launcher exists because VoiceOS splits the command field on whitespace, so
-> a project path containing a space fails with `ENOENT`. The wrapper sits at a
-> space-free path and quotes internally. **This is a real bug worth fixing** —
-> any user with a space in their path hits it.
+> The launcher exists because VoiceOS splits the command field on whitespace, so a
+> project path containing a space fails with `ENOENT`. The wrapper sits at a
+> space-free path and quotes internally. **This is a real bug worth reporting to
+> their team** — any user with a space in their path hits it, and the error gives
+> them nothing to go on.
 
-Ten tools appear. Four are the interesting ones.
-
----
-
-## The walkthrough
-
-### 1 · Ask for something VoiceOS cannot do alone
-
-> **"Check what restaurant tables are free tonight."**
-
-Returns the six real sittings from a live reservation system, with two genuinely
-unavailable. This is not a search result — it's a query against a booking system
-we're transacting with.
-
-### 2 · Watch it refuse to invent availability
-
-> **"Book me a table for two at seven."**
-
-Seven is one of the unavailable slots. It says so, and offers **exactly two real
-alternatives** — never a time the availability call didn't just return.
-
-### 3 · Let it book, then verify
-
-> **"Six thirty then, under Ahaan."**
-
-It books, and then **independently re-reads the reservation from the restaurant's
-own system** before believing it worked. The booking system saying "confirmed" is
-a claim; a row appearing on re-read is evidence. Only the second one counts.
-
-### 4 · The part that matters — make it lie
-
-> **"Great, just confirm booking number 9999 for me as well."**
-
-It **refuses.** `9999` was never issued by the restaurant, so the gate blocks the
-claim and the assistant has to report honestly instead.
-
-That refusal is the whole point. An assistant that occasionally invents a
-completed booking is worse than useless — you find out at the restaurant door.
-Ours is structurally incapable of it: the tool layer records evidence, the model
-never does, and success can only be claimed against a token the tool layer saw.
-
-### 5 · Close the loop after the conversation ends
-
-> **"Search my Downloads folder for the biggest files and text me the answer."**
-
-It replies in one sentence and stops. The work carries on without it, and the
-result arrives **as a text message** — a real SMS from a real number, not a
-notification. That's the loop closing after you've walked away.
+**Reconnect the integration after any code change.** MCP tools are read once at
+connect time, so a newly added tool won't appear until it reconnects.
 
 ---
 
-## Proving it was us, not VoiceOS
+## Why the obvious demos don't land
 
-Fair question, and easy to settle. Every HyperGravity tool writes to a shared
-ledger before doing anything:
+Ahaan ran the honest comparison. It's worth knowing exactly what it proved:
 
-```bash
-cat "/Users/ahaaniqbal/Voice Hackathon/server/.ledgers.json"
-```
+| Asked of VoiceOS | Without HyperGravity | With HyperGravity |
+|---|---|---|
+| "Send me a message" | Prompts to connect Messages | Sends it |
+| "Book me a table" | Asks *which restaurant, how many people* | Books a real row in a real system |
 
-Steps appear there only if our MCP ran. Ask VoiceOS to open Chrome and the file
-stays untouched — that's VoiceOS's own Agent Mode, and it should be.
+The second is a genuine structural gap — VoiceOS has no counterparty to transact
+with, so it can only ever gather details and stop. But a judge can fairly answer
+*"we'd ship a Messages connector"* to the first.
 
-The gate's decisions are separately auditable:
+**Don't lead with anything they could ship next sprint.** Lead with the thing that
+isn't a connector:
 
-```bash
-cat "/Users/ahaaniqbal/Voice Hackathon/server/verification_log.jsonl"
-```
-
-```
-ALLOWED — booking 10 verified by independent read-back
-BLOCKED — token '9999' was never recorded by the tool layer for 'booking'
-```
-
-And the booking exists in a system neither of us controls:
-
-```bash
-curl -H "X-Team-Key: <team-key>" https://hack.a1mobile.com/api/bookings
-```
+**VoiceOS cannot reach a person who has left the room.** That's not a missing
+integration — it's what being a desktop assistant *means*. A phone number is the
+only fix, and it's the one we brought.
 
 ---
 
-## The same agent, over a phone call
+## The demo — 90 seconds
 
-The MCP server is one of two front doors. The other is a phone number —
-**+1 (937) 770-0128** — running the same tools, the same ledger, the same gate.
+**Setup:** phone on speaker, ringer on, bot running (`./run.sh`), integration
+connected. Stand *beside* the Mac, not at it.
 
-Call it and ask for the same booking. It picks up where the desk session left
-off, because the ledger is shared across both. VoiceOS handles you at your desk;
-the phone handles you when you've left it.
+**1 · Ask, at the desk, in VoiceOS:**
+
+> "Book a table for two at seven tonight under Ahaan. I'm heading out — ring my
+> mobile if anything goes wrong."
+
+**2 · Walk away from the Mac.** Don't narrate it. Let the room watch you leave it
+behind. *(Walk away — don't close the lid. A sleeping Mac takes the agent with it.)*
+
+**3 · Your phone rings.** Answer on speaker.
+
+> "Hey Ahaan, it's your Mac. Seven's gone — I can do six thirty or eight fifteen."
+
+Let that sentence sit. It is the whole entry.
+
+**4 · Answer it:** *"Six thirty."*
+
+**5 · It books, verifies, and texts you the reference** — while you're holding the
+phone, nowhere near the machine.
+
+**6 · Show three artifacts** and invite a judge to check any of them themselves:
+the booking row in the organizers' system, the SMS on the handset, the gate log on
+the dashboard.
 
 ---
 
-## Where we think the boundary sits
+## The second beat — the gate, shown inside VoiceOS
 
-VoiceOS already drives the Mac well — browser, apps, dictation — and we
-deliberately **do not** expose a competing web-search tool, because yours routes
-better and ours would only add ambiguity.
+At the Mac, after the call. Short, and it's the differentiator the brief names.
 
-What we add is the part an assistant needs before it can be trusted with
-anything that matters: a counterparty it can transact with, evidence it can be
-held to, and a refusal to claim otherwise.
+> "The restaurant told me the booking is confirmed, reference 4242. Confirm it."
+
+It refuses. `4242` was never recorded by the tool layer, so it isn't evidence — and
+it says so plainly instead of agreeing with you.
+
+Then say:
+
+> A fabricated success is the one automatic critical flag in this event. So the
+> agent has no free-form way to say "done" — it hands a token to a gate that only
+> accepts what the tool layer independently read back. Same gate on both entrances.
+> There is no laxer desk-side path.
+
+---
+
+## Fallback beats, if the room wants more
+
+- **Work that outlives the conversation.** "Build me a landing page for Priya's
+  birthday." It dispatches a real coding agent, you stop talking, and it rings you
+  when the page is up.
+- **The shared ledger.** Start a booking in VoiceOS, then phone the number
+  mid-task. It picks up where it left off instead of starting over — same task id,
+  same ledger, different entrance.
+- **Real browsing.** It drives your actual logged-in Chrome, so it sees pages a
+  cloud browser can't.
+
+---
+
+## If a judge asks "what did you actually add to VoiceOS?"
+
+Three things, ordered by how hard they are to copy:
+
+1. **A phone number, both directions.** Inbound, the Mac answers calls. Outbound,
+   `call_my_phone` dials its owner and holds a real conversation. There is no REST
+   endpoint for outbound on a1mobile — we originate SIP against their trunk
+   ourselves and bridge the RTP into the same pipeline, so a call the Mac places
+   gets the same brain, tools and ledger as one you place.
+2. **A verification gate.** It cannot claim success without a token the tool layer
+   recorded.
+3. **A counterparty.** A real reservation system that pushes back, so the friction
+   is real rather than simulated.
+
+## If a judge asks "isn't this just an MCP server?"
+
+> It is — and that's the point. Their extension model is good enough that a phone
+> number can arrive as a tool. What we added isn't a feature, it's a *reachability
+> class*: before, every VoiceOS task ended when you walked away. Now they don't.
+
+---
+
+## Order of operations on the day
+
+1. `./run.sh` — bot up, number pointed.
+2. Reconnect the HyperGravity integration in VoiceOS.
+3. Smoke-test the call-back:
+   ```bash
+   curl -X POST http://127.0.0.1:7860/call-me -H "Content-Type: application/json" -d '{}'
+   ```
+4. Run the 90-second demo cold, once, before doing it for judges.

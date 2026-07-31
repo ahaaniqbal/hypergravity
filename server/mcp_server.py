@@ -21,6 +21,8 @@ import asyncio
 import os
 from pathlib import Path
 
+import httpx
+
 from dotenv import load_dotenv
 from mcp.server import MCPServer
 
@@ -413,6 +415,61 @@ def hypergravity_task_status() -> str:
     tail = ("\n\nSTILL RUNNING (not finished — do not guess the result): "
             + "; ".join(running)) if running else ""
     return f"{led.summary()}\n\n{report(led)}{tail}"
+
+
+@mcp.tool()
+async def call_my_phone(say: str, to: str = "") -> str:
+    """Ring the owner's mobile and start a live voice conversation with them.
+
+    This Mac has a phone number, so it can reach its owner when they are not at
+    it. Use it when the answer should not wait until they wander back — or, more
+    usefully, when you need a decision from someone who has already left: a time
+    that turned out to be unavailable, a message you are about to send on their
+    behalf, anything you should not decide alone.
+
+    It is a real call, not a notification. They can talk back, and the agent that
+    picks up shares this one's tools and task ledger — so whatever they ask for
+    on the phone continues the work that was started here, rather than beginning
+    a new conversation from nothing.
+
+    Args:
+        say: The first sentence spoken when they answer. Say who is calling and
+            why, in one breath — nobody expects their computer to ring them.
+        to: E.164 number. Defaults to the owner's verified mobile.
+    """
+    say = (say or "").strip()
+    if not say:
+        return "Nothing to say — give me the opening line."
+
+    # The call is placed by the phone bot's own process, not this one. The
+    # opening line reaches the answering session through a table in that
+    # process's memory, so originating it here would place a call that arrives
+    # with no idea why it rang.
+    body: dict[str, str] = {"opening": say}
+    if to:
+        body["to"] = to
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as http:
+            resp = await http.post("http://127.0.0.1:7860/call-me", json=body)
+    except httpx.HTTPError:
+        return (
+            "The phone service isn't running, so I can't place the call — "
+            "nothing was dialled. Start it with ./run.sh."
+        )
+    if resp.status_code == 503:
+        return "SIP isn't configured on this Mac, so I can't place calls. Nothing was dialled."
+    if resp.status_code >= 400:
+        return f"Couldn't place the call: {resp.text[:120]}. Nothing was dialled."
+
+    dest = resp.json().get("calling", "their mobile")
+    _ledger().mark(f"call {dest}", StepState.PENDING, say[:60])
+    # Ringing is not answering. Report what was actually done — the call was
+    # placed — and let the phone leg report whether anyone picked up.
+    return (
+        f"Ringing {dest} now. Tell them to expect their phone to buzz. Do NOT say "
+        "they answered or what they said — you cannot see that from here; the "
+        "conversation continues on the phone."
+    )
 
 
 if __name__ == "__main__":

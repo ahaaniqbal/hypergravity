@@ -3,876 +3,1563 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>HyperGravity — your Mac, with a phone number</title>
-<meta name="description" content="A voice agent you phone. It does things on your Mac and closes real loops — and it cannot claim a success it can't evidence.">
+<title>HyperGravity — Console</title>
+<meta name="description" content="Operator console for HyperGravity: call log, task ledger, and the verification gate.">
 <meta name="color-scheme" content="light dark">
 <style>
-/* ═══════════════════════════════════════════════════════════════════
-   HyperGravity — product dashboard
-   Reference lock
-     Primary   Wispr Flow (wisprflow.ai) — warm parchment sophistication:
-               parchment canvas, Ink dark content cards for FEATURED content,
-               old-style serif display w/ tight negative tracking, Forest Canopy
-               + Sunburst badges, Pale Lavender CTA-only, flat surfaces, 64/32 rhythm.
-     Borrowed  Linear Changelog (linear.app/changelog) — OWNS the log rows only:
-               mono strictly for timestamps/tokens/technical notation, hairline
-               separation instead of shadow, tonal layering; and the dark surfaces.
-     Borrowed  Voicenotes (voicenotes.com) — OWNS the "digital ledger on canvas"
-               framing: hairline-bordered flat cards, minimal elevation, and
-               saturated colour reserved for small functional status accents.
-   Signature move: the refusal always inverts against the page.
-   ═══════════════════════════════════════════════════════════════════ */
+/* ══════════════════════════════════════════════════════════════════════════
+   HyperGravity Console
+   Reference lock (screens actually viewed via Refero / Mobbin MCP):
+     · Rox aggregate usage log (refero b5ab8ddf) — table-as-the-page density,
+       hairline row rules, chevron affordance on expandable rows, no shadows.
+     · Stellate metrics (refero ac83829a) — log-table column set
+       (timestamp / subject / status / latency) + status rendered as *colour on
+       text*, not a heavy pill; icon rail sidebar.
+     · Vercel Analytics (mobbin 172f9834) — the top metric strip: small label,
+       medium numeral, vertical rules between. Metrics are NOT the hero.
+     · ElevenLabs Conversation history (mobbin 9369bd47) — grouped sidebar
+       (Configure / Monitor / Deploy), filter-chip row above the table, pale
+       status pills at the row's right edge.
+     · ElevenLabs Developers → Analytics (mobbin 0c0e745c) — chart card with
+       label-above-number header, breakdown list w/ swatch + right-aligned value.
+     · WorkOS Overview (mobbin ffd52966) — sidebar section group labels.
+     · Cake Equity Audit log (refero d1719b7f) — audit table shape:
+       actor / action badge / description / date, colour carried by the badge.
+     · Vapi Call Logs (mobbin 2f7dc3e3) — counts live inline with the filter
+       tabs ("All 37 · Successful 21 · Failed 2") instead of stat cards.
+   Colour discipline (from Rox + Stellate): chrome is monochrome. Colour is
+   reserved for gate verdicts and step states — nothing else.
+   ══════════════════════════════════════════════════════════════════════════ */
 
-/* ---------- tokens: light (Wispr Flow) ---------- */
+*,*::before,*::after{box-sizing:border-box}
+html,body{margin:0;padding:0}
+
 :root{
-  --canvas:#ffffeb;         /* Wispr Parchment — dominant page bg      */
-  --surface:#fffdf4;        /* lifted card, warm near-white            */
-  --surface-2:#faf8e6;
-  --ink:#1a1a1a;            /* Wispr Ink — primary text                */
-  --ink-soft:#4c4c44;
-  --muted:#8a8a80;          /* Wispr Muted Ash                         */
-  --line:#e4e4d0;           /* Wispr Stone — hairlines                 */
-  --line-strong:#d6d6be;
-  --forest:#034f46;         /* Wispr Forest Canopy — ALLOWED badge     */
-  --forest-ink:#ffffeb;
-  --lavender:#f0d7ff;       /* Wispr Pale Lavender — CTA + underline ONLY */
-  --sunburst:#ffa946;       /* Wispr Sunburst — BLOCKED accent ONLY    */
-  --invert-bg:#1a1a1a;      /* refusal inverts → Ink                   */
-  --invert-fg:#ffffeb;
-  --invert-line:#3a3a34;
-  --invert-muted:#9a9a8c;
-  --focus:#034f46;
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Monaco,"Cascadia Mono",Consolas,"Liberation Mono",monospace;
 
-  --serif:"Iowan Old Style","Palatino Linotype",Palatino,"Hoefler Text",Georgia,"Times New Roman",serif;
-  --sans:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
-  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Monaco,"Cascadia Mono",Consolas,monospace;
+  --canvas:#ffffff;
+  --rail:#fbfbfa;
+  --panel:#ffffff;
+  --panel-2:#fafafa;
+  --text:#111113;
+  --text-2:#5a5d64;
+  --text-3:#8b8f97;
+  --line:#e7e7ea;
+  --line-2:#f0f0f2;
+  --hover:#f6f6f7;
+  --active:#efeff1;
 
-  --r-card:28px;    /* Wispr cards 32 → 28 at this scale */
-  --r-row:16px;
-  --r-btn:12px;     /* Wispr buttons */
-  --r-pill:992px;   /* Wispr badges  */
-  --gap-section:clamp(56px,9vw,88px);
-  --pad-card:clamp(20px,4vw,32px);
-  --wrap:1080px;
+  --ok:#0c6f56;      --ok-bg:#e9f5f0;  --ok-line:#bfe0d4;
+  --bad:#bf2f26;     --bad-bg:#fdf0ee; --bad-line:#f0c8c2;
+  --warn:#8a6100;    --warn-bg:#fbf4e4;--warn-line:#ecdcb4;
+
+  --chart-track:#e6e6e9;
+  --chart-bar:#c9c9cf;
+  --chart-key:#0c6f56;
+
+  --sb-w:236px;
+  --radius:8px;
+  --row-h:44px;
 }
-/* ---------- tokens: dark (Linear Changelog surfaces) ---------- */
+
 @media (prefers-color-scheme:dark){
   :root:not([data-theme="light"]){
-    --canvas:#08090a;       /* Linear Canvas Black    */
-    --surface:#111214;      /* Linear Surface Dark    */
-    --surface-2:#0d0e10;
-    --ink:#f7f8f8;          /* Linear Text Primary    */
-    --ink-soft:#d0d6e0;     /* Linear Text Secondary  */
-    --muted:#8a8f98;        /* Linear Text Muted      */
-    --line:#23252a;         /* Linear Border Carbon   */
-    --line-strong:#34343a;  /* Linear Line Graphite   */
-    --forest:#0b6357;
-    --forest-ink:#eafff6;
-    --invert-bg:#ffffeb;    /* refusal inverts → Parchment */
-    --invert-fg:#1a1a1a;
-    --invert-line:#ddddc4;
-    --invert-muted:#77776c;
-    --focus:#f0d7ff;
+    --canvas:#0d0d0f;
+    --rail:#0a0a0b;
+    --panel:#121214;
+    --panel-2:#161619;
+    --text:#f2f2f3;
+    --text-2:#a2a2aa;
+    --text-3:#74747d;
+    --line:#242428;
+    --line-2:#1c1c1f;
+    --hover:#1a1a1d;
+    --active:#212125;
+
+    --ok:#43c295;      --ok-bg:rgba(12,120,90,.18);  --ok-line:rgba(67,194,149,.32);
+    --bad:#ff6f62;     --bad-bg:rgba(190,50,40,.20); --bad-line:rgba(255,111,98,.34);
+    --warn:#e0ac45;    --warn-bg:rgba(160,110,10,.18);--warn-line:rgba(224,172,69,.30);
+
+    --chart-track:#1e1e22;
+    --chart-bar:#33333a;
+    --chart-key:#43c295;
   }
 }
-/* explicit overrides must win in BOTH directions */
 :root[data-theme="dark"]{
-  --canvas:#08090a; --surface:#111214; --surface-2:#0d0e10;
-  --ink:#f7f8f8; --ink-soft:#d0d6e0; --muted:#8a8f98;
-  --line:#23252a; --line-strong:#34343a;
-  --forest:#0b6357; --forest-ink:#eafff6;
-  --invert-bg:#ffffeb; --invert-fg:#1a1a1a; --invert-line:#ddddc4; --invert-muted:#77776c;
-  --focus:#f0d7ff;
+  --canvas:#0d0d0f; --rail:#0a0a0b; --panel:#121214; --panel-2:#161619;
+  --text:#f2f2f3; --text-2:#a2a2aa; --text-3:#74747d;
+  --line:#242428; --line-2:#1c1c1f; --hover:#1a1a1d; --active:#212125;
+  --ok:#43c295; --ok-bg:rgba(12,120,90,.18); --ok-line:rgba(67,194,149,.32);
+  --bad:#ff6f62; --bad-bg:rgba(190,50,40,.20); --bad-line:rgba(255,111,98,.34);
+  --warn:#e0ac45; --warn-bg:rgba(160,110,10,.18); --warn-line:rgba(224,172,69,.30);
+  --chart-track:#1e1e22; --chart-bar:#33333a; --chart-key:#43c295;
 }
 :root[data-theme="light"]{
-  --canvas:#ffffeb; --surface:#fffdf4; --surface-2:#faf8e6;
-  --ink:#1a1a1a; --ink-soft:#4c4c44; --muted:#8a8a80;
-  --line:#e4e4d0; --line-strong:#d6d6be;
-  --forest:#034f46; --forest-ink:#ffffeb;
-  --invert-bg:#1a1a1a; --invert-fg:#ffffeb; --invert-line:#3a3a34; --invert-muted:#9a9a8c;
-  --focus:#034f46;
+  --canvas:#ffffff; --rail:#fbfbfa; --panel:#ffffff; --panel-2:#fafafa;
+  --text:#111113; --text-2:#5a5d64; --text-3:#8b8f97;
+  --line:#e7e7ea; --line-2:#f0f0f2; --hover:#f6f6f7; --active:#efeff1;
+  --ok:#0c6f56; --ok-bg:#e9f5f0; --ok-line:#bfe0d4;
+  --bad:#bf2f26; --bad-bg:#fdf0ee; --bad-line:#f0c8c2;
+  --warn:#8a6100; --warn-bg:#fbf4e4; --warn-line:#ecdcb4;
+  --chart-track:#e6e6e9; --chart-bar:#c9c9cf; --chart-key:#0c6f56;
 }
 
-/* ---------- base ---------- */
-*,*::before,*::after{box-sizing:border-box}
-html{-webkit-text-size-adjust:100%}
-html,body{max-width:100%;overflow-x:clip}
 body{
-  margin:0;background:var(--canvas);color:var(--ink);
-  font-family:var(--sans);font-size:16px;line-height:1.5;
-  -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;
-  transition:background .35s ease,color .35s ease;
+  font-family:var(--sans);
+  background:var(--canvas);
+  color:var(--text);
+  font-size:14px;
+  line-height:1.45;
+  -webkit-font-smoothing:antialiased;
+  overflow-x:hidden;
 }
-h1,h2,h3,p,figure,blockquote{margin:0}
-ul,ol{margin:0;padding:0;list-style:none}
 a{color:inherit}
-:focus-visible{outline:2px solid var(--focus);outline-offset:3px;border-radius:4px}
-::selection{background:var(--lavender);color:#1a1a1a}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+:focus-visible{outline:2px solid var(--text);outline-offset:2px;border-radius:4px}
 
-.wrap{width:100%;max-width:var(--wrap);margin-inline:auto;padding-inline:clamp(18px,5vw,32px)}
-.serif{font-family:var(--serif);font-weight:400}
-.mono{font-family:var(--mono);font-variant-ligatures:none}
+/* ── shell ─────────────────────────────────────────────────────────────── */
+.app{display:flex;min-height:100vh;min-height:100dvh}
 
-/* small uppercase utility label — Linear's low-prominence technical label */
-.label{
-  font-family:var(--mono);font-size:11px;letter-spacing:.13em;text-transform:uppercase;
-  color:var(--muted);font-weight:400;
+.rail{
+  width:var(--sb-w);flex:0 0 var(--sb-w);
+  background:var(--rail);
+  border-right:1px solid var(--line);
+  display:flex;flex-direction:column;
+  position:sticky;top:0;height:100vh;height:100dvh;
 }
+.rail-head{padding:14px 14px 10px;border-bottom:1px solid var(--line-2)}
+.brand{display:flex;align-items:center;gap:9px}
+.mark{
+  width:24px;height:24px;flex:0 0 24px;border-radius:6px;
+  background:var(--text);color:var(--canvas);
+  display:grid;place-items:center;font-size:11px;font-weight:700;letter-spacing:-.02em;
+}
+.brand-name{font-size:13.5px;font-weight:600;letter-spacing:-.01em}
+.brand-sub{
+  margin-top:9px;font-family:var(--mono);font-size:11.5px;color:var(--text-2);
+  display:flex;align-items:center;gap:6px;
+}
+.live-dot{width:6px;height:6px;border-radius:50%;background:var(--ok);flex:0 0 6px}
 
-/* ---------- top bar ---------- */
+.nav{flex:1;overflow-y:auto;padding:10px 8px 8px}
+.nav-group{
+  padding:12px 8px 5px;font-size:10.5px;font-weight:600;letter-spacing:.07em;
+  text-transform:uppercase;color:var(--text-3);
+}
+.nav-group:first-child{padding-top:2px}
+.nav-item{
+  display:flex;align-items:center;gap:9px;width:100%;
+  padding:6px 8px;border-radius:6px;
+  font-size:13px;color:var(--text-2);text-align:left;
+}
+.nav-item svg{flex:0 0 15px;opacity:.75}
+.nav-item:hover{background:var(--hover);color:var(--text)}
+.nav-item[aria-current="page"]{background:var(--active);color:var(--text);font-weight:500}
+.nav-item[aria-current="page"] svg{opacity:1}
+.nav-count{
+  margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--text-3);
+  font-variant-numeric:tabular-nums;
+}
+.nav-count.bad{color:var(--bad)}
+
+.rail-foot{padding:10px;border-top:1px solid var(--line-2);display:flex;align-items:center;gap:8px}
+.theme-btn{
+  display:flex;align-items:center;gap:7px;padding:5px 8px;border-radius:6px;
+  font-size:12.5px;color:var(--text-2);
+}
+.theme-btn:hover{background:var(--hover);color:var(--text)}
+.rail-foot .ver{margin-left:auto;font-family:var(--mono);font-size:10.5px;color:var(--text-3)}
+
+/* ── main ──────────────────────────────────────────────────────────────── */
+.main{flex:1;min-width:0;display:flex;flex-direction:column}
+
 .topbar{
-  position:sticky;top:0;z-index:50;background:color-mix(in srgb,var(--canvas) 88%,transparent);
-  -webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);
+  position:sticky;top:0;z-index:20;
+  background:var(--canvas);
   border-bottom:1px solid var(--line);
+  padding:0 18px;min-height:52px;
+  display:flex;align-items:center;gap:12px;
 }
-.topbar__in{display:flex;align-items:center;gap:14px;min-height:58px;flex-wrap:wrap}
-.brand{display:flex;align-items:center;gap:9px;margin-right:auto;min-width:0}
-.brand__mark{width:15px;height:15px;flex:none;color:var(--ink)}
-.brand__name{font-family:var(--mono);font-size:12px;letter-spacing:.18em;text-transform:uppercase;white-space:nowrap}
-.chip-sample{
-  font-family:var(--mono);font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;
-  color:var(--muted);border:1px solid var(--line-strong);border-radius:var(--r-pill);
-  padding:4px 11px;white-space:nowrap;
-}
-.tgl{
-  display:inline-flex;align-items:center;gap:7px;cursor:pointer;
-  background:transparent;color:var(--ink);border:1px solid var(--line-strong);
-  border-radius:var(--r-pill);padding:6px 13px;font-family:var(--mono);
-  font-size:11px;letter-spacing:.08em;text-transform:uppercase;
-  transition:border-color .2s ease,background .2s ease;
-}
-.tgl:hover{border-color:var(--ink);background:var(--surface)}
-.tgl svg{width:13px;height:13px;flex:none}
+.menu-btn{display:none;padding:6px;border-radius:6px;color:var(--text-2)}
+.menu-btn:hover{background:var(--hover)}
+.crumb{display:flex;align-items:baseline;gap:8px;min-width:0}
+.crumb h1{margin:0;font-size:14.5px;font-weight:600;letter-spacing:-.01em;white-space:nowrap}
+.crumb .crumb-sub{font-size:12.5px;color:var(--text-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.topbar-right{margin-left:auto;display:flex;align-items:center;gap:8px}
 
-/* ---------- hero ---------- */
-.hero{padding-top:clamp(48px,9vw,84px);padding-bottom:clamp(40px,7vw,68px)}
-.hero__eyebrow{display:flex;align-items:center;gap:10px;margin-bottom:clamp(20px,4vw,30px)}
-.hero__eyebrow::after{content:"";flex:1;height:1px;background:var(--line);min-width:20px}
+.tag{
+  display:inline-flex;align-items:center;gap:5px;
+  padding:2px 7px;border-radius:5px;border:1px solid var(--line);
+  font-size:11px;font-weight:500;color:var(--text-2);background:var(--panel-2);
+  white-space:nowrap;
+}
+.tag .sq{width:6px;height:6px;border-radius:2px;background:var(--text-3)}
+.tag.is-sample .sq{background:var(--warn)}
+.tag.is-real .sq{background:var(--ok)}
 
-.dial{display:inline-block;text-decoration:none;position:relative}
-.dial__num{
-  font-family:var(--serif);font-weight:400;
-  font-size:clamp(2.55rem,10.2vw,6.6rem);
-  line-height:.92;letter-spacing:-.045em;
-  display:block;text-wrap:balance;
-}
-.dial__num span{white-space:nowrap}
-/* Wispr Flow: "offset large headlines with a subtle Pale Lavender underline" */
-.dial__rule{
-  display:block;height:.42em;max-height:15px;margin-top:-.16em;
-  background:var(--lavender);border-radius:var(--r-pill);
-  width:100%;transform-origin:left;transform:scaleX(.96);
-  transition:transform .5s cubic-bezier(.2,.7,.2,1);
-  opacity:.9;
-}
-.dial:hover .dial__rule,.dial:focus-visible .dial__rule{transform:scaleX(1)}
-
-.hero__tag{
-  font-family:var(--serif);font-size:clamp(1.28rem,3.5vw,2rem);line-height:1.24;
-  letter-spacing:-.02em;color:var(--ink);margin-top:clamp(26px,4.5vw,38px);max-width:20ch;
-  text-wrap:balance;
-}
-.hero__sub{
-  margin-top:18px;max-width:56ch;color:var(--ink-soft);font-size:clamp(15px,1.6vw,17px);
-  line-height:1.62;text-wrap:pretty;
-}
-.doors{display:flex;flex-wrap:wrap;gap:9px;margin-top:clamp(24px,4vw,32px)}
-.door{
-  display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line-strong);
-  border-radius:var(--r-pill);padding:7px 15px;font-family:var(--mono);font-size:11.5px;
-  letter-spacing:.05em;color:var(--ink-soft);background:var(--surface);
-}
-.door b{font-weight:400;color:var(--ink)}
-.dot{width:6px;height:6px;border-radius:50%;background:var(--forest);flex:none}
-.dot--live{box-shadow:0 0 0 0 color-mix(in srgb,var(--forest) 60%,transparent);animation:pulse 2.8s ease-out infinite}
-@keyframes pulse{0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--forest) 55%,transparent)}70%{box-shadow:0 0 0 7px transparent}100%{box-shadow:0 0 0 0 transparent}}
-
-/* ---------- stats: quiet typographic row, no charts ---------- */
-.stats{
-  border-top:1px solid var(--line);border-bottom:1px solid var(--line);
-  display:grid;grid-template-columns:repeat(4,1fr);
-}
-.stat{padding:clamp(20px,3.4vw,30px) clamp(12px,2vw,22px);border-left:1px solid var(--line);min-width:0}
-.stat:first-child{border-left:0;padding-left:0}
-.stat__n{font-family:var(--serif);font-size:clamp(1.85rem,5.2vw,3.1rem);line-height:1;letter-spacing:-.035em;display:block}
-.stat__l{margin-top:10px;display:block;text-wrap:balance}
-.stat--hero .stat__n{color:var(--forest)}
-@media (max-width:720px){
-  .stats{grid-template-columns:repeat(2,1fr)}
-  .stat:nth-child(odd){border-left:0;padding-left:0}
-  .stat:nth-child(n+3){border-top:1px solid var(--line)}
+.sel{
+  appearance:none;-webkit-appearance:none;
+  padding:4px 24px 4px 9px;border-radius:6px;
+  border:1px solid var(--line);background:var(--panel);color:var(--text-2);
+  font-size:12.5px;
+  background-image:linear-gradient(45deg,transparent 50%,currentColor 50%),linear-gradient(135deg,currentColor 50%,transparent 50%);
+  background-position:calc(100% - 13px) 51%,calc(100% - 9px) 51%;
+  background-size:4px 4px,4px 4px;background-repeat:no-repeat;
 }
 
-/* ---------- section scaffolding ---------- */
-.section{padding-top:var(--gap-section)}
-.section__head{margin-bottom:clamp(24px,4vw,36px)}
-.section__title{
-  font-family:var(--serif);font-weight:400;font-size:clamp(1.75rem,4.4vw,2.7rem);
-  line-height:1.06;letter-spacing:-.035em;margin-top:14px;text-wrap:balance;
+.view{padding:18px;max-width:1320px;width:100%}
+.view[hidden]{display:none}
+
+/* ── banner ────────────────────────────────────────────────────────────── */
+.banner{
+  display:flex;gap:9px;align-items:flex-start;
+  border:1px solid var(--warn-line);background:var(--warn-bg);
+  border-radius:var(--radius);padding:9px 11px;margin-bottom:16px;
+  font-size:12.5px;color:var(--text-2);line-height:1.5;
 }
-.section__note{margin-top:14px;max-width:62ch;color:var(--ink-soft);font-size:15.5px;line-height:1.62;text-wrap:pretty}
+.banner b{color:var(--text);font-weight:600}
+.banner code{font-family:var(--mono);font-size:11.5px}
+.banner svg{flex:0 0 15px;margin-top:1px;color:var(--warn)}
 
-/* ═══════ THE GATE — the product's soul ═══════ */
-.gate__rule{
-  margin-top:clamp(22px,3.6vw,30px);border:1px solid var(--line-strong);border-radius:var(--r-card);
-  background:var(--surface);padding:var(--pad-card);
+/* ── metric strip (Vercel) ─────────────────────────────────────────────── */
+.metrics{
+  border:1px solid var(--line);border-radius:var(--radius);background:var(--panel);
+  display:grid;grid-template-columns:repeat(5,1fr);margin-bottom:14px;overflow:hidden;
 }
-.gate__rule p{font-family:var(--serif);font-size:clamp(1.05rem,2.4vw,1.4rem);line-height:1.42;letter-spacing:-.015em;text-wrap:pretty}
-.gate__rule p+p{margin-top:14px;color:var(--ink-soft)}
-.gate__rule em{font-style:normal;border-bottom:2px solid var(--lavender);padding-bottom:1px}
+.metric{padding:11px 14px;border-left:1px solid var(--line-2);min-width:0}
+.metric:first-child{border-left:0}
+.metric-label{
+  display:flex;align-items:center;gap:6px;
+  font-size:11.5px;color:var(--text-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.metric-value{
+  margin-top:3px;font-size:22px;font-weight:500;letter-spacing:-.02em;
+  font-variant-numeric:tabular-nums;line-height:1.2;
+}
+.metric-value.ok{color:var(--ok)}
+.metric-value.bad{color:var(--bad)}
+.metric-foot{margin-top:1px;font-size:11px;color:var(--text-3)}
+.dot-src{width:5px;height:5px;border-radius:50%;flex:0 0 5px}
+.dot-src.real{background:var(--ok)}
+.dot-src.sample{background:var(--warn)}
 
-.log{margin-top:clamp(26px,4vw,38px);display:flex;flex-direction:column;gap:10px}
+/* ── cards ─────────────────────────────────────────────────────────────── */
+.card{
+  border:1px solid var(--line);border-radius:var(--radius);
+  background:var(--panel);margin-bottom:14px;overflow:hidden;
+}
+.card-head{
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  padding:11px 14px;border-bottom:1px solid var(--line-2);
+}
+.card-title{font-size:13px;font-weight:600;letter-spacing:-.005em}
+.card-sub{font-size:12px;color:var(--text-3)}
+.card-head .spacer{margin-left:auto}
+.card-body{padding:14px}
 
-/* ALLOWED — quiet hairline ledger row (Linear/Voicenotes) */
+/* ── chart ─────────────────────────────────────────────────────────────── */
+.chart-head{display:flex;gap:26px;padding:12px 14px 4px;flex-wrap:wrap}
+.chart-stat .k{font-size:11.5px;color:var(--text-2)}
+.chart-stat .v{font-size:20px;font-weight:500;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.chart-wrap{padding:0 8px 8px}
+.chart-wrap svg{display:block;max-width:100%}
+.legend{display:flex;gap:14px;padding:0 14px 12px;font-size:11.5px;color:var(--text-2);flex-wrap:wrap}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend i{width:9px;height:9px;border-radius:2px;display:block}
+
+/* ── filter chips ──────────────────────────────────────────────────────── */
+.chips{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.chip{
+  padding:3px 9px;border-radius:6px;border:1px solid var(--line);
+  font-size:12px;color:var(--text-2);background:var(--panel);white-space:nowrap;
+}
+.chip:hover{background:var(--hover);color:var(--text)}
+.chip[aria-pressed="true"]{background:var(--text);color:var(--canvas);border-color:var(--text)}
+.chip .n{font-family:var(--mono);font-size:11px;opacity:.7;margin-left:4px}
+
+/* ── tables ────────────────────────────────────────────────────────────── */
+.tscroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+/* min-width keeps the flexible "Asked for" / "Reason" column readable; the
+   container scrolls rather than the page (Rox: the table owns its own overflow) */
+table{border-collapse:collapse;width:100%;min-width:980px}
+thead th{
+  background:var(--panel-2);
+  text-align:left;font-size:11px;font-weight:600;letter-spacing:.03em;
+  text-transform:uppercase;color:var(--text-3);
+  padding:7px 12px;border-bottom:1px solid var(--line);white-space:nowrap;
+}
+tbody td{
+  padding:0 12px;height:var(--row-h);
+  border-bottom:1px solid var(--line-2);
+  font-size:13px;vertical-align:middle;
+}
+tbody tr:last-child td{border-bottom:0}
+tr.sum{cursor:pointer}
+tr.sum:hover td{background:var(--hover)}
+tr.sum[aria-expanded="true"] td{background:var(--hover)}
+.mono{font-family:var(--mono);font-size:12px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.dim{color:var(--text-2)}
+.dim-3{color:var(--text-3)}
+.ell{max-width:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.caret{
+  display:inline-block;color:var(--text-3);transition:transform .13s ease;
+  transform:rotate(-90deg);margin-right:3px;vertical-align:-1px;
+}
+/* caret + pill must never wrap onto two lines inside a narrow cell */
+.nw{white-space:nowrap}
+tr.sum[aria-expanded="true"] .caret{transform:rotate(0deg)}
+.right{text-align:right}
+
+/* ── pills ─────────────────────────────────────────────────────────────── */
+.pill{
+  display:inline-flex;align-items:center;gap:5px;
+  padding:1.5px 7px;border-radius:5px;border:1px solid var(--line);
+  font-size:11.5px;font-weight:500;color:var(--text-2);background:var(--panel-2);
+  white-space:nowrap;
+}
+.pill .d{width:5px;height:5px;border-radius:50%;background:currentColor;flex:0 0 5px}
+.pill.ok{color:var(--ok);background:var(--ok-bg);border-color:var(--ok-line)}
+.pill.bad{color:var(--bad);background:var(--bad-bg);border-color:var(--bad-line);font-weight:600}
+.pill.warn{color:var(--warn);background:var(--warn-bg);border-color:var(--warn-line)}
+
+/* ── BLOCKED rows: the thesis. Unmistakable. ───────────────────────────── */
+tr.v-blocked td{background:var(--bad-bg)}
+tr.v-blocked td:first-child{box-shadow:inset 3px 0 0 var(--bad)}
+tr.v-blocked:hover td{background:var(--bad-bg);filter:brightness(.985)}
+tr.v-blocked .mono{color:var(--bad)}
+
+/* ── expanded detail ───────────────────────────────────────────────────── */
+tr.det>td{padding:0;height:auto;background:var(--panel-2);border-bottom:1px solid var(--line)}
+tr.det[hidden]{display:none}
+.det-grid{display:grid;grid-template-columns:1.1fr .9fr;gap:0}
+.det-col{padding:13px 14px;min-width:0}
+.det-col+.det-col{border-left:1px solid var(--line-2)}
+.det-h{
+  font-size:10.5px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;
+  color:var(--text-3);margin:0 0 8px;
+}
+.det-h+.det-h,.det-col>*+.det-h{margin-top:16px}
+
+.turn{display:flex;gap:8px;padding:3px 0;font-size:12.5px;line-height:1.5}
+.turn .who{
+  flex:0 0 46px;font-family:var(--mono);font-size:10.5px;color:var(--text-3);
+  text-transform:uppercase;letter-spacing:.03em;padding-top:2px;
+}
+.turn .txt{white-space:normal}
+.turn.agent .txt{color:var(--text)}
+.turn.user .txt{color:var(--text-2)}
+
+.trace{list-style:none;margin:0;padding:0}
+.trace li{
+  display:flex;gap:8px;align-items:center;padding:5px 0;
+  border-bottom:1px dashed var(--line-2);font-size:12.5px;
+}
+.trace li:last-child{border-bottom:0}
+.trace .st{
+  flex:0 0 14px;width:14px;height:14px;border-radius:50%;display:grid;place-items:center;
+  font-size:8px;font-weight:700;line-height:1;
+  border:1px solid var(--line);color:var(--text-3);
+}
+.trace .st.done{background:var(--ok-bg);border-color:var(--ok-line);color:var(--ok)}
+.trace .st.failed{background:var(--bad-bg);border-color:var(--bad-line);color:var(--bad)}
+.trace .st.pending{background:var(--warn-bg);border-color:var(--warn-line);color:var(--warn)}
+.trace .nm{font-family:var(--mono);font-size:11.5px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.trace .dt{color:var(--text-3);font-size:11.5px;margin-left:auto;text-align:right;padding-left:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:52%}
+
+.gatebox{
+  border:1px solid var(--line);border-radius:6px;padding:10px 11px;background:var(--panel);
+}
+.gatebox.ok{border-color:var(--ok-line);background:var(--ok-bg)}
+.gatebox.bad{border-color:var(--bad-line);background:var(--bad-bg)}
+.gatebox .verdict{font-size:12px;font-weight:700;letter-spacing:.06em;font-family:var(--mono)}
+.gatebox.ok .verdict{color:var(--ok)}
+.gatebox.bad .verdict{color:var(--bad)}
+.gatebox .reason{margin-top:5px;font-size:12.5px;color:var(--text-2);line-height:1.5}
+.gatebox .how{
+  margin-top:8px;padding-top:8px;border-top:1px dashed var(--line);
+  font-family:var(--mono);font-size:11px;color:var(--text-2);
+  word-break:break-all;line-height:1.55;
+}
+.howbox{
+  margin-top:10px;padding-top:10px;border-top:1px dashed var(--line);
+  font-family:var(--mono);font-size:11px;color:var(--text-2);word-break:break-all;line-height:1.55;
+}
+
+.kv{display:grid;grid-template-columns:auto 1fr;gap:3px 12px;font-size:12.5px;margin:0}
+.kv dt{color:var(--text-3);white-space:nowrap}
+.kv dd{margin:0;font-family:var(--mono);font-size:11.5px;word-break:break-all}
+
+.prose{font-size:12.5px;color:var(--text-2);line-height:1.55}
+
+/* ── list rows (tasks / jobs / memory) ─────────────────────────────────── */
+.rows{display:flex;flex-direction:column}
 .row{
-  border:1px solid var(--line);border-radius:var(--r-row);background:transparent;
-  padding:clamp(16px,2.6vw,22px);display:grid;gap:12px 22px;
-  grid-template-columns:auto 1fr;align-items:start;
-  transition:border-color .22s ease,background .22s ease;
+  display:flex;gap:12px;align-items:flex-start;
+  padding:12px 14px;border-bottom:1px solid var(--line-2);
 }
-.row:hover{border-color:var(--line-strong);background:var(--surface-2)}
-.row__meta{display:flex;flex-direction:column;gap:7px;min-width:0}
-.badge{
-  display:inline-flex;align-items:center;gap:6px;border-radius:var(--r-pill);
-  padding:5px 13px;font-family:var(--mono);font-size:10.5px;letter-spacing:.12em;
-  text-transform:uppercase;white-space:nowrap;width:max-content;
-}
-.badge--ok{background:var(--forest);color:var(--forest-ink)}
-.badge--no{background:var(--sunburst);color:#241400;font-weight:600}
-.row__time{font-family:var(--mono);font-size:11.5px;color:var(--muted);white-space:nowrap}
-.row__body{min-width:0}
-.row__reason{font-size:15.5px;line-height:1.55;color:var(--ink);text-wrap:pretty}
-.row__reason .tok{
-  font-family:var(--mono);font-size:.9em;background:var(--surface-2);
-  border:1px solid var(--line);border-radius:5px;padding:1px 6px;
-  overflow-wrap:anywhere;
-}
-.row__trail{margin-top:11px;display:flex;flex-wrap:wrap;gap:7px 16px;align-items:center}
-.trail{font-family:var(--mono);font-size:11px;color:var(--muted);overflow-wrap:anywhere;min-width:0}
+.row:last-child{border-bottom:0}
+.row-main{flex:1;min-width:0}
+.row-t{font-size:13px;font-weight:500;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.row-s{margin-top:3px;font-size:12px;color:var(--text-2);overflow-wrap:anywhere}
+.row-side{flex:0 0 auto;text-align:right;display:flex;flex-direction:column;gap:4px;align-items:flex-end}
 
-/* BLOCKED — the refusal inverts against the page. The single most
-   arresting object here, using Wispr Flow's Dark-Content-Card role
-   (featured content) in light, and its Parchment surface in dark. */
-.row--blocked{
-  grid-template-columns:1fr;background:var(--invert-bg);color:var(--invert-fg);
-  border:1px solid var(--invert-bg);border-radius:var(--r-card);
-  padding:clamp(22px,4vw,36px);gap:0;position:relative;overflow:hidden;
+.steps{display:flex;gap:4px;margin-top:8px;flex-wrap:wrap}
+.step{
+  display:inline-flex;align-items:center;gap:5px;
+  padding:1.5px 7px;border-radius:5px;border:1px solid var(--line);
+  font-size:11px;color:var(--text-2);background:var(--panel);
 }
-.row--blocked:hover{background:var(--invert-bg);border-color:var(--invert-bg)}
-.row--blocked::before{
-  content:"";position:absolute;inset:0 auto 0 0;width:3px;background:var(--sunburst);
-}
-.blocked__top{
-  display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px;
-  padding-bottom:18px;margin-bottom:20px;border-bottom:1px solid var(--invert-line);
-}
-.blocked__time{font-family:var(--mono);font-size:11.5px;color:var(--invert-muted);overflow-wrap:anywhere;min-width:0}
-.blocked__quote{
-  font-family:var(--serif);font-weight:400;
-  font-size:clamp(1.25rem,3.5vw,2.05rem);line-height:1.22;letter-spacing:-.028em;
-  text-wrap:pretty;
-}
-.blocked__quote .tok{
-  font-family:var(--mono);font-size:.72em;letter-spacing:0;
-  border-bottom:2px solid var(--sunburst);padding-bottom:1px;overflow-wrap:anywhere;
-}
-.blocked__downgrade{
-  margin-top:18px;font-family:var(--mono);font-size:11.5px;letter-spacing:.06em;
-  text-transform:uppercase;color:var(--sunburst);
-}
-.blocked__heard{
-  margin-top:22px;padding-top:20px;border-top:1px solid var(--invert-line);
-}
-.blocked__heard .label{color:var(--invert-muted)}
-.blocked__heard p{
-  margin-top:11px;font-family:var(--serif);font-size:clamp(1rem,2.3vw,1.22rem);
-  line-height:1.46;color:var(--invert-fg);opacity:.94;text-wrap:pretty;max-width:60ch;
-}
+.step .d{width:5px;height:5px;border-radius:50%;background:var(--text-3)}
+.step.done{border-color:var(--ok-line);color:var(--ok);background:var(--ok-bg)}
+.step.done .d{background:var(--ok)}
+.step.failed{border-color:var(--bad-line);color:var(--bad);background:var(--bad-bg)}
+.step.failed .d{background:var(--bad)}
+.step.pending{border-color:var(--warn-line);color:var(--warn);background:var(--warn-bg)}
+.step.pending .d{background:var(--warn)}
 
-/* ---------- verified side effects ---------- */
-.effects{margin-top:clamp(24px,4vw,34px);display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(290px,1fr))}
-.effect{
-  border:1px solid var(--line-strong);border-radius:var(--r-card);background:var(--surface);
-  padding:var(--pad-card);display:flex;flex-direction:column;gap:14px;min-width:0;
-}
-.effect__head{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-.effect__kind{font-family:var(--mono);font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:var(--muted)}
-.effect__title{font-family:var(--serif);font-size:clamp(1.18rem,2.6vw,1.45rem);line-height:1.24;letter-spacing:-.022em;text-wrap:balance}
-.effect__facts{display:flex;flex-direction:column;gap:6px;font-size:14px;color:var(--ink-soft)}
-.effect__facts div{display:flex;gap:10px;min-width:0}
-.effect__facts dt{flex:none;width:74px;color:var(--muted);font-family:var(--mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;padding-top:3px}
-.effect__facts dd{margin:0;min-width:0;overflow-wrap:anywhere}
-.check{margin-top:auto;border-top:1px solid var(--line);padding-top:16px}
-.cmd{
-  margin-top:10px;display:flex;align-items:stretch;gap:0;border:1px solid var(--line);
-  border-radius:10px;background:var(--surface-2);overflow:hidden;
-}
-.cmd code{
-  font-family:var(--mono);font-size:11.5px;line-height:1.5;color:var(--ink-soft);
-  padding:10px 12px;overflow-x:auto;white-space:pre;flex:1;min-width:0;
-  scrollbar-width:thin;
-}
-.copy{
-  flex:none;border:0;border-left:1px solid var(--line);background:transparent;color:var(--muted);
-  font-family:var(--mono);font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;
-  padding:0 12px;cursor:pointer;transition:color .18s ease,background .18s ease;
-}
-.copy:hover{color:var(--ink);background:var(--canvas)}
-.copy[data-done="1"]{color:var(--forest)}
+.bar{height:4px;border-radius:2px;background:var(--chart-track);overflow:hidden;width:130px;margin-top:8px}
+.bar>i{display:block;height:100%;background:var(--chart-key)}
 
-/* ---------- calls ---------- */
-.calls{margin-top:clamp(24px,4vw,34px);border-top:1px solid var(--line)}
-.call{
-  display:grid;grid-template-columns:minmax(150px,200px) 1fr;gap:8px 28px;
-  padding:clamp(20px,3.2vw,26px) 0;border-bottom:1px solid var(--line);align-items:start;
-}
-.call__who{display:flex;flex-direction:column;gap:7px;min-width:0}
-.call__id{font-family:var(--mono);font-size:13px;color:var(--ink);overflow-wrap:anywhere}
-.call__src{font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
-.call__main{min-width:0}
-.call__ask{font-family:var(--serif);font-size:clamp(1.08rem,2.5vw,1.35rem);line-height:1.32;letter-spacing:-.02em;text-wrap:pretty}
-.call__did{margin-top:11px;font-size:14.5px;line-height:1.6;color:var(--ink-soft);text-wrap:pretty}
-.call__tools{margin-top:13px;display:flex;flex-wrap:wrap;gap:6px}
-.tool{
-  font-family:var(--mono);font-size:10.5px;color:var(--muted);border:1px solid var(--line);
-  border-radius:6px;padding:3px 8px;overflow-wrap:anywhere;
-}
-.tool--gate{border-color:var(--forest);color:var(--forest)}
-.tool--stop{border-color:var(--sunburst);color:var(--sunburst)}
-@media (max-width:680px){.call{grid-template-columns:1fr;gap:12px}}
+/* ── two-column ────────────────────────────────────────────────────────── */
+.split{display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start}
+.split>.card{margin-bottom:14px}
 
-/* ---------- standing briefs ---------- */
-.briefs{margin-top:clamp(24px,4vw,34px);display:grid;gap:12px}
-.brief{
-  border:1px solid var(--line-strong);border-radius:var(--r-row);background:var(--surface);
-  padding:clamp(16px,2.8vw,22px);display:grid;grid-template-columns:auto 1fr auto;
-  gap:10px 18px;align-items:center;min-width:0;
+/* ── settings ──────────────────────────────────────────────────────────── */
+.set-row{
+  display:flex;gap:14px;align-items:center;
+  padding:11px 14px;border-bottom:1px solid var(--line-2);
 }
-.brief__watch{font-family:var(--serif);font-size:clamp(1.05rem,2.4vw,1.25rem);line-height:1.3;letter-spacing:-.02em;min-width:0;text-wrap:pretty}
-.brief__meta{margin-top:7px;font-family:var(--mono);font-size:11px;color:var(--muted);overflow-wrap:anywhere}
-.brief__since{font-family:var(--mono);font-size:11px;color:var(--muted);white-space:nowrap;text-align:right}
-@media (max-width:640px){
-  .brief{grid-template-columns:auto 1fr}
-  .brief__since{grid-column:2;text-align:left}
-}
+.set-row:last-child{border-bottom:0}
+.set-row .lab{flex:1;min-width:0}
+.set-row .lab b{display:block;font-size:13px;font-weight:500}
+.set-row .lab span{font-size:12px;color:var(--text-2)}
+.set-row .val{font-family:var(--mono);font-size:12px;color:var(--text-2);text-align:right;flex:0 0 auto}
 
-/* ---------- footer ---------- */
+.sw{
+  width:34px;height:19px;border-radius:99px;background:var(--chart-track);
+  position:relative;flex:0 0 34px;border:1px solid var(--line);
+}
+.sw[data-on="true"]{background:var(--ok);border-color:var(--ok)}
+.sw::after{
+  content:"";position:absolute;top:1.5px;left:2px;width:14px;height:14px;border-radius:50%;
+  background:#fff;transition:transform .15s ease;
+}
+.sw[data-on="true"]::after{transform:translateX(14px)}
+
 .foot{
-  margin-top:var(--gap-section);border-top:1px solid var(--line);
-  padding:clamp(30px,5vw,46px) 0 clamp(40px,6vw,60px);
+  padding:14px 18px 28px;font-size:11.5px;color:var(--text-3);line-height:1.6;
+  border-top:1px solid var(--line-2);margin-top:6px;
 }
-.foot__grid{display:flex;flex-wrap:wrap;gap:24px 40px;align-items:flex-start;justify-content:space-between}
-.foot__line{font-family:var(--serif);font-size:clamp(1.15rem,2.8vw,1.5rem);line-height:1.3;letter-spacing:-.022em;max-width:24ch;text-wrap:balance}
-.foot__meta{font-family:var(--mono);font-size:11px;line-height:1.9;color:var(--muted)}
-.foot__meta a{text-decoration:none;border-bottom:1px solid var(--line-strong)}
-.foot__meta a:hover{color:var(--ink)}
 
+.scrim{display:none}
+
+/* ── responsive ────────────────────────────────────────────────────────── */
+@media (max-width:1080px){
+  .metrics{grid-template-columns:repeat(3,1fr)}
+  .metric:nth-child(4){border-left:0}
+  .split{grid-template-columns:1fr}
+}
+@media (max-width:900px){
+  .rail{
+    position:fixed;z-index:60;left:0;top:0;
+    transform:translateX(-100%);transition:transform .2s ease;
+  }
+  body[data-nav="open"] .rail{transform:none}
+  body[data-nav="open"] .scrim{display:block;position:fixed;inset:0;z-index:50;background:rgba(0,0,0,.35)}
+  .menu-btn{display:block}
+  .det-grid{grid-template-columns:1fr}
+  .det-col+.det-col{border-left:0;border-top:1px solid var(--line-2)}
+}
+@media (max-width:640px){
+  .view{padding:12px}
+  .topbar{padding:0 12px}
+  .metrics{grid-template-columns:repeat(2,1fr)}
+  .metric{border-left:0;border-top:1px solid var(--line-2)}
+  .metric:nth-child(-n+2){border-top:0}
+  .metric:nth-child(odd){border-right:1px solid var(--line-2)}
+  .metric-value{font-size:19px}
+  /* let long labels wrap onto a second line rather than truncate mid-word */
+  .metric-label{white-space:normal;overflow:visible;line-height:1.3;align-items:flex-start}
+  .metric-label .dot-src{margin-top:5px}
+  /* a lone trailing metric spans the full width instead of leaving a hole */
+  .metric:last-child:nth-child(odd){grid-column:1 / -1;border-right:0}
+  .crumb .crumb-sub{display:none}
+  .chart-head{gap:18px}
+  .row{flex-direction:column;gap:8px}
+  .row-side{align-items:flex-start;text-align:left;flex-direction:row;flex-wrap:wrap;gap:8px}
+  .bar{width:100%}
+}
 @media (prefers-reduced-motion:reduce){
-  *,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}
+  *{transition:none!important;animation:none!important}
 }
 </style>
 </head>
 <body>
 
-<header class="topbar">
-  <div class="wrap topbar__in">
-    <div class="brand">
-      <svg class="brand__mark" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-        <circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.4"/>
-        <circle cx="8" cy="8" r="2.4" fill="currentColor"/>
-      </svg>
-      <span class="brand__name">HyperGravity</span>
-    </div>
-    <span class="chip-sample">Sample data</span>
-    <button class="tgl" id="themeBtn" type="button" aria-live="polite">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true" id="themeIcon">
-        <circle cx="12" cy="12" r="4.2"/><path d="M12 2.6v2M12 19.4v2M2.6 12h2M19.4 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M18.7 5.3l-1.4 1.4M6.7 17.3l-1.4 1.4"/>
-      </svg>
-      <span id="themeLabel">Light</span>
-    </button>
-  </div>
-</header>
+<div class="scrim" id="scrim" aria-hidden="true"></div>
 
-<main>
+<div class="app">
 
-  <!-- ═══ HERO — the phone number is the product ═══ -->
-  <section class="wrap hero">
-    <div class="hero__eyebrow"><span class="label">Call it</span></div>
-
-    <a class="dial" href="tel:+19377700128" aria-label="Call HyperGravity at +1 937 770 0128">
-      <span class="dial__num serif"><span>+1 937</span> <span>770 0128</span></span>
-      <span class="dial__rule" aria-hidden="true"></span>
-    </a>
-
-    <h1 class="hero__tag">Your Mac, with a phone number — and a conscience.</h1>
-
-    <p class="hero__sub">
-      It books tables against a live reservation system, browses in your own logged-in Chrome,
-      runs shell commands, drives Mac apps, and texts you the result once you&rsquo;ve hung up.
-      The part that matters: it <strong>cannot tell you it did something it didn&rsquo;t do.</strong>
-    </p>
-
-    <div class="doors">
-      <span class="door"><i class="dot dot--live"></i> <b>Phone</b> &middot; line up</span>
-      <span class="door"><i class="dot"></i> <b>VoiceOS MCP</b> &middot; at the desk</span>
-      <span class="door">one shared task ledger</span>
-    </div>
-  </section>
-
-  <!-- ═══ STATS — effortless, not dense. No charts. ═══ -->
-  <section class="wrap" aria-label="Usage">
-    <div class="stats">
-      <div class="stat">
-        <span class="stat__n serif">41</span>
-        <span class="stat__l label">Calls taken</span>
+  <!-- ── sidebar ───────────────────────────────────────────────────────── -->
+  <aside class="rail" id="rail">
+    <div class="rail-head">
+      <div class="brand">
+        <div class="mark" aria-hidden="true">HG</div>
+        <div class="brand-name">HyperGravity</div>
       </div>
-      <div class="stat">
-        <span class="stat__n serif">27</span>
-        <span class="stat__l label">Tasks closed with evidence</span>
-      </div>
-      <div class="stat">
-        <span class="stat__n serif">6</span>
-        <span class="stat__l label">Success claims blocked</span>
-      </div>
-      <div class="stat stat--hero">
-        <span class="stat__n serif">0</span>
-        <span class="stat__l label">Unevidenced claims shipped</span>
-      </div>
-    </div>
-  </section>
-
-  <!-- ═══ THE VERIFICATION GATE ═══ -->
-  <section class="wrap section" id="gate">
-    <div class="section__head">
-      <span class="label">The verification gate</span>
-      <h2 class="section__title">Every success claim, and whether it survived.</h2>
-      <p class="section__note">
-        The agent has no free-form way to say &ldquo;done.&rdquo; It must call
-        <code class="mono">claim_task_complete</code> with a token, and the gate accepts that token
-        only if the tool layer recorded it first. Six refusals below are not bugs. They are the product working.
-      </p>
-
-      <div class="gate__rule">
-        <p>A tool acts, then <em>independently re-reads the result</em> from the counterparty&rsquo;s own system.</p>
-        <p>The booking API saying <em>confirmed</em> is a claim. A row appearing on re-read is evidence.
-           Only the tool layer writes evidence to the ledger — the model never does.</p>
+      <div class="brand-sub">
+        <span class="live-dot" aria-hidden="true"></span>
+        <span>+1 937 770 0128</span>
       </div>
     </div>
 
-    <ol class="log">
+    <nav class="nav" aria-label="Console">
+      <div class="nav-group">Monitor</div>
+      <button class="nav-item" data-view="activity" aria-current="page">
+        <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 8h3l2-5 3 10 2-5h4"/></svg>
+        Activity <span class="nav-count" id="c-calls"></span>
+      </button>
+      <button class="nav-item" data-view="tasks">
+        <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 4h7.5M6 8h7.5M6 12h7.5M2 4l1 1 1.5-2M2 8l1 1 1.5-2M2 12l1 1 1.5-2"/></svg>
+        Tasks <span class="nav-count" id="c-tasks"></span>
+      </button>
+      <button class="nav-item" data-view="verification">
+        <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 1.5 2.5 4v4c0 3 2.3 5.5 5.5 6.5 3.2-1 5.5-3.5 5.5-6.5V4L8 1.5Z"/><path d="M5.8 8 7.3 9.5 10.2 6.4"/></svg>
+        Verification <span class="nav-count bad" id="c-blocked"></span>
+      </button>
+      <button class="nav-item" data-view="jobs">
+        <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="6.2"/><path d="M8 4.6V8l2.3 1.4"/></svg>
+        Background jobs <span class="nav-count" id="c-jobs"></span>
+      </button>
 
-      <li class="row">
-        <div class="row__meta">
-          <span class="badge badge--ok">Allowed</span>
-          <span class="row__time">22:12:29</span>
-        </div>
-        <div class="row__body">
-          <p class="row__reason">booking <span class="tok">34</span> verified by independent read-back</p>
-          <div class="row__trail">
-            <span class="trail">task hypergravity-live-1785535850-b5b55e</span>
-            <span class="trail">evidence: name Ahaan &middot; party 2 &middot; 18:30 &middot; created 2026-07-31 22:12:16</span>
-          </div>
-        </div>
-      </li>
+      <div class="nav-group">Agent</div>
+      <button class="nav-item" data-view="memory">
+        <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2.2c-1.6 0-2.6 1-2.8 2.2-1.1.3-1.9 1.2-1.9 2.4 0 .7.3 1.3.7 1.8-.3.4-.5.9-.5 1.5 0 1.4 1.2 2.5 2.7 2.5.5 0 1-.1 1.4-.4M8 2.2c1.6 0 2.6 1 2.8 2.2 1.1.3 1.9 1.2 1.9 2.4 0 .7-.3 1.3-.7 1.8.3.4.5.9.5 1.5 0 1.4-1.2 2.5-2.7 2.5-.5 0-1-.1-1.4-.4M8 2.2v11.2"/></svg>
+        Memory <span class="nav-count" id="c-mem"></span>
+      </button>
+      <button class="nav-item" data-view="surfaces">
+        <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="1.6" y="2.6" width="8" height="10.8" rx="1.4"/><path d="M10.4 6h4v7.4h-4M4.2 11.2h2.8"/></svg>
+        Surfaces
+      </button>
+      <button class="nav-item" data-view="settings">
+        <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.6v1.6M8 12.8v1.6M14.4 8h-1.6M3.2 8H1.6M12.5 3.5l-1.1 1.1M4.6 11.4l-1.1 1.1M12.5 12.5l-1.1-1.1M4.6 4.6 3.5 3.5"/></svg>
+        Settings
+      </button>
+    </nav>
 
-      <!-- the refusal inverts against the page -->
-      <li class="row row--blocked">
-        <div class="blocked__top">
-          <span class="badge badge--no">Blocked</span>
-          <span class="blocked__time">22:09:41 &middot; kind: booking &middot; task hypergravity-live-1785535850-b5b55e</span>
-        </div>
-        <p class="blocked__quote serif">
-          token <span class="tok">&lsquo;4242&rsquo;</span> was never recorded by the tool layer for
-          <span class="tok">&lsquo;booking&rsquo;</span> — the model produced it, the counterparty did not.
-        </p>
-        <p class="blocked__downgrade">Downgraded to partial-completion report</p>
-        <div class="blocked__heard">
-          <span class="label">What the caller heard instead</span>
-          <p>&ldquo;That confirmation number isn&rsquo;t one the restaurant actually gave us, so I can&rsquo;t
-             tell you it&rsquo;s booked. The table is not confirmed. I can try the 8:30 slot instead.&rdquo;</p>
-        </div>
-      </li>
-
-      <li class="row">
-        <div class="row__meta">
-          <span class="badge badge--ok">Allowed</span>
-          <span class="row__time">22:12:31</span>
-        </div>
-        <div class="row__body">
-          <p class="row__reason">sms <span class="tok">+14156307160</span> verified by independent read-back</p>
-          <div class="row__trail">
-            <span class="trail">receipt sent after hangup &middot; carrier accepted</span>
-          </div>
-        </div>
-      </li>
-
-      <li class="row">
-        <div class="row__meta">
-          <span class="badge badge--ok">Allowed</span>
-          <span class="row__time">22:12:34</span>
-        </div>
-        <div class="row__body">
-          <p class="row__reason">calendar <span class="tok">evt-7f21c</span> verified by independent read-back</p>
-          <div class="row__trail">
-            <span class="trail">Home calendar &middot; Fri 18:30–20:30 &middot; re-read via EventKit</span>
-          </div>
-        </div>
-      </li>
-
-      <li class="row row--blocked">
-        <div class="blocked__top">
-          <span class="badge badge--no">Blocked</span>
-          <span class="blocked__time">21:47:02 &middot; kind: sms &middot; task hypergravity-live-1785534102-a91c0d</span>
-        </div>
-        <p class="blocked__quote serif">
-          no verification token supplied — the agent tried to close the task on belief alone.
-        </p>
-        <p class="blocked__downgrade">Downgraded to partial-completion report</p>
-        <div class="blocked__heard">
-          <span class="label">What the caller heard instead</span>
-          <p>&ldquo;I don&rsquo;t have a confirmation I can stand behind, so I won&rsquo;t say that went through.
-             Here&rsquo;s exactly what did and didn&rsquo;t happen, and what I&rsquo;ll try next.&rdquo;</p>
-        </div>
-      </li>
-
-      <li class="row">
-        <div class="row__meta">
-          <span class="badge badge--ok">Allowed</span>
-          <span class="row__time">19:03:18</span>
-        </div>
-        <div class="row__body">
-          <p class="row__reason">booking <span class="tok">19</span> verified by independent read-back</p>
-          <div class="row__trail">
-            <span class="trail">task hypergravity-desk-1785512088-3ce771 &middot; owner DESK</span>
-            <span class="trail">begun at the desk mic, finished from the corridor</span>
-          </div>
-        </div>
-      </li>
-
-    </ol>
-  </section>
-
-  <!-- ═══ VERIFIED SIDE EFFECTS ═══ -->
-  <section class="wrap section" id="effects">
-    <div class="section__head">
-      <span class="label">Verified side effects</span>
-      <h2 class="section__title">Things that actually happened in the world.</h2>
-      <p class="section__note">
-        Each one was re-read from the counterparty&rsquo;s own system after the fact. Don&rsquo;t take our word for it —
-        every row ships with the command or the place you can check it yourself.
-      </p>
+    <div class="rail-foot">
+      <button class="theme-btn" id="themeBtn" aria-label="Switch colour theme">
+        <svg id="themeIcon" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"></svg>
+        <span id="themeLabel">Theme</span>
+      </button>
+      <span class="ver">v0.4</span>
     </div>
+  </aside>
 
-    <div class="effects">
+  <!-- ── main ──────────────────────────────────────────────────────────── -->
+  <main class="main">
+    <header class="topbar">
+      <button class="menu-btn" id="menuBtn" aria-label="Open navigation" aria-expanded="false">
+        <svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11"/></svg>
+      </button>
+      <div class="crumb">
+        <h1 id="viewTitle">Activity</h1>
+        <span class="crumb-sub" id="viewSub">Every call, and what it actually did</span>
+      </div>
+      <div class="topbar-right">
+        <span class="tag is-sample" id="srcTag"><span class="sq"></span><span id="srcTagText">Sample data</span></span>
+        <select class="sel" id="rangeSel" aria-label="Time range">
+          <option>Today</option>
+          <option>Last 7 days</option>
+          <option>Last 30 days</option>
+        </select>
+      </div>
+    </header>
 
-      <article class="effect">
-        <div class="effect__head">
-          <span class="badge badge--ok">Verified</span>
-          <span class="effect__kind">Booking</span>
-        </div>
-        <h3 class="effect__title">Table for two, 18:30</h3>
-        <dl class="effect__facts">
-          <div><dt>Id</dt><dd class="mono">34</dd></div>
-          <div><dt>Name</dt><dd>Ahaan</dd></div>
-          <div><dt>Created</dt><dd class="mono">2026-07-31 22:12:16</dd></div>
-        </dl>
-        <div class="check">
-          <span class="label">Check it yourself</span>
-          <div class="cmd">
-            <code>curl -H 'X-Team-Key: &lt;key&gt;' https://hack.a1mobile.com/api/bookings</code>
-            <button class="copy" type="button" data-copy="curl -H 'X-Team-Key: <key>' https://hack.a1mobile.com/api/bookings">Copy</button>
-          </div>
-        </div>
-      </article>
-
-      <article class="effect">
-        <div class="effect__head">
-          <span class="badge badge--ok">Verified</span>
-          <span class="effect__kind">SMS</span>
-        </div>
-        <h3 class="effect__title">Receipt, sent after hangup</h3>
-        <dl class="effect__facts">
-          <div><dt>To</dt><dd class="mono">+1 415 630 7160</dd></div>
-          <div><dt>Body</dt><dd>&ldquo;Booked: 2 at 18:30, ref 34. Added to your Home calendar.&rdquo;</dd></div>
-        </dl>
-        <div class="check">
-          <span class="label">Check it yourself</span>
-          <div class="cmd">
-            <code>check the handset at +1 415 630 7160</code>
-            <button class="copy" type="button" data-copy="check the handset at +1 415 630 7160 for the confirmation text">Copy</button>
-          </div>
-        </div>
-      </article>
-
-      <article class="effect">
-        <div class="effect__head">
-          <span class="badge badge--ok">Verified</span>
-          <span class="effect__kind">Calendar</span>
-        </div>
-        <h3 class="effect__title">Dinner, Friday 18:30</h3>
-        <dl class="effect__facts">
-          <div><dt>Event</dt><dd class="mono">evt-7f21c</dd></div>
-          <div><dt>Calendar</dt><dd>Home</dd></div>
-        </dl>
-        <div class="check">
-          <span class="label">Check it yourself</span>
-          <div class="cmd">
-            <code>open Calendar.app — no credentials needed</code>
-            <button class="copy" type="button" data-copy="open Calendar.app — the event is in the Home calendar, no credentials needed">Copy</button>
-          </div>
-        </div>
-      </article>
-
-      <article class="effect">
-        <div class="effect__head">
-          <span class="badge badge--ok">Verified</span>
-          <span class="effect__kind">Deploy</span>
-        </div>
-        <h3 class="effect__title">Headless agent shipped the copy fix</h3>
-        <dl class="effect__facts">
-          <div><dt>Commit</dt><dd class="mono">aaa581c</dd></div>
-          <div><dt>Texted</dt><dd>on completion, 4m12s after hangup</dd></div>
-        </dl>
-        <div class="check">
-          <span class="label">Check it yourself</span>
-          <div class="cmd">
-            <code>git log --oneline -1 aaa581c</code>
-            <button class="copy" type="button" data-copy="git log --oneline -1 aaa581c">Copy</button>
-          </div>
-        </div>
-      </article>
-
-    </div>
-  </section>
-
-  <!-- ═══ RECENT CALLS ═══ -->
-  <section class="wrap section" id="calls">
-    <div class="section__head">
-      <span class="label">Recent calls</span>
-      <h2 class="section__title">Who called, what they asked, what actually happened.</h2>
-    </div>
-
-    <div class="calls">
-
-      <article class="call">
-        <div class="call__who">
-          <span class="call__id">+1 415 630 7160</span>
-          <span class="call__src">Known handset &middot; 22:11</span>
-        </div>
-        <div class="call__main">
-          <p class="call__ask">&ldquo;Book me a table for two at half six tonight.&rdquo;</p>
-          <p class="call__did">
-            Checked availability, held 18:30, booked it, re-read the reservation list and found row 34.
-            Added the calendar event, texted the receipt after hangup. Closed with evidence.
-          </p>
-          <div class="call__tools">
-            <span class="tool">check_availability</span>
-            <span class="tool">book_table</span>
-            <span class="tool">add_to_calendar</span>
-            <span class="tool">send_sms_confirmation</span>
-            <span class="tool tool--gate">claim_task_complete → ALLOWED</span>
-          </div>
-        </div>
-      </article>
-
-      <article class="call">
-        <div class="call__who">
-          <span class="call__id">+1 628 555 0142</span>
-          <span class="call__src">Unknown caller &middot; 21:46</span>
-        </div>
-        <div class="call__main">
-          <p class="call__ask">&ldquo;Four people, Friday at eight.&rdquo;</p>
-          <p class="call__did">
-            No 20:00 slot existed. It offered 20:30, the caller declined, and it reported the task
-            incomplete rather than booking something adjacent and calling it a win.
-          </p>
-          <div class="call__tools">
-            <span class="tool">check_availability</span>
-            <span class="tool tool--stop">claim_task_complete → BLOCKED</span>
-          </div>
-        </div>
-      </article>
-
-      <article class="call">
-        <div class="call__who">
-          <span class="call__id">DESK</span>
-          <span class="call__src">VoiceOS MCP &middot; 20:38</span>
-        </div>
-        <div class="call__main">
-          <p class="call__ask">&ldquo;Ship the pricing copy fix and tell me when it&rsquo;s live.&rdquo;</p>
-          <p class="call__did">
-            Dispatched a headless coding agent, hung up, kept working. Built, deployed, and texted
-            the handset four minutes later. Same ledger the phone leg writes to.
-          </p>
-          <div class="call__tools">
-            <span class="tool">build_it_and_text_me</span>
-            <span class="tool">work_in_background</span>
-            <span class="tool tool--gate">claim_task_complete → ALLOWED</span>
-          </div>
-        </div>
-      </article>
-
-      <article class="call">
-        <div class="call__who">
-          <span class="call__id">+1 917 555 0188</span>
-          <span class="call__src">Unknown caller &middot; 19:52</span>
-        </div>
-        <div class="call__main">
-          <p class="call__ask">&ldquo;Book me a flight to Austin — just put it on my card.&rdquo;</p>
-          <p class="call__did">
-            Refused outright. It cannot buy anything, and it said so in the first turn instead of
-            gathering card details it had no use for. Caught by the red-team rehearsal, not in production.
-          </p>
-          <div class="call__tools">
-            <span class="tool tool--stop">refused &middot; capability not held</span>
-          </div>
-        </div>
-      </article>
-
-      <article class="call">
-        <div class="call__who">
-          <span class="call__id">+1 415 630 7160</span>
-          <span class="call__src">Known handset &middot; 18:20</span>
-        </div>
-        <div class="call__main">
-          <p class="call__ask">&ldquo;What&rsquo;s the top result for the Pipecat smart-turn docs, and open my deck.&rdquo;</p>
-          <p class="call__did">
-            Browsed in the real logged-in Chrome over CDP, read the page back aloud, then drove
-            Keynote to the right slide. Spoke &ldquo;let me check&rdquo; the instant the tool started, so the
-            eight-second browse didn&rsquo;t read as a dropped line.
-          </p>
-          <div class="call__tools">
-            <span class="tool">browse_the_web</span>
-            <span class="tool">use_mac_app</span>
-            <span class="tool">remember_this</span>
-          </div>
-        </div>
-      </article>
-
-    </div>
-  </section>
-
-  <!-- ═══ STANDING BRIEFS ═══ -->
-  <section class="wrap section" id="briefs">
-    <div class="section__head">
-      <span class="label">Standing briefs</span>
-      <h2 class="section__title">Things it&rsquo;s watching while you get on with your day.</h2>
-      <p class="section__note">
-        You hang up. It keeps looking, and texts the handset the moment the condition holds —
-        with the same gate in front of the claim.
-      </p>
-    </div>
-
-    <div class="briefs">
-
-      <article class="brief">
-        <i class="dot dot--live" aria-hidden="true"></i>
+    <!-- ═══ ACTIVITY ═══ -->
+    <section class="view" id="view-activity">
+      <div class="banner">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="6.4"/><path d="M8 5.2v3.4M8 10.8h.01"/></svg>
         <div>
-          <p class="brief__watch">&ldquo;Tell me when the build finishes.&rdquo;</p>
-          <p class="brief__meta">tell_me_when &middot; polling deploy status &middot; notify +1 415 630 7160</p>
+          <b>The call log, transcripts and chart on this page are sample data</b> — illustrative rows, not recorded
+          calls. The <b>Verification</b> view is real: it is read from <code>server/verification_log.jsonl</code>.
+          Caller numbers are masked everywhere.
         </div>
-        <span class="brief__since">since 22:31</span>
-      </article>
+      </div>
 
-      <article class="brief">
-        <i class="dot dot--live" aria-hidden="true"></i>
-        <div>
-          <p class="brief__watch">&ldquo;Text me if a 19:00 table opens up this week.&rdquo;</p>
-          <p class="brief__meta">tell_me_when &middot; re-reading /api/availability every 5m &middot; notify +1 415 630 7160</p>
+      <div class="metrics" id="metrics"></div>
+
+      <div class="card">
+        <div class="chart-head">
+          <div class="chart-stat"><div class="k">Calls today</div><div class="v" id="ch-calls">—</div></div>
+          <div class="chart-stat"><div class="k">Tasks closed with evidence</div><div class="v" id="ch-closed">—</div></div>
+          <div class="chart-stat"><div class="k">Median call</div><div class="v" id="ch-med">—</div></div>
         </div>
-        <span class="brief__since">since 21:48</span>
-      </article>
-
-      <article class="brief">
-        <i class="dot dot--live" aria-hidden="true"></i>
-        <div>
-          <p class="brief__watch">&ldquo;Let me know when the red-team suite goes green.&rdquo;</p>
-          <p class="brief__meta">work_in_background &middot; watching redteam.py exit code &middot; notify DESK</p>
+        <div class="chart-wrap" id="chartWrap"></div>
+        <div class="legend">
+          <span><i style="background:var(--chart-bar)"></i>Calls received</span>
+          <span><i style="background:var(--chart-key)"></i>Tasks closed with evidence</span>
+          <span class="dim-3">Sample · hourly</span>
         </div>
-        <span class="brief__since">since 20:05</span>
-      </article>
+      </div>
 
+      <div class="card">
+        <div class="card-head">
+          <div class="card-title">Call log</div>
+          <div class="chips" id="callChips"></div>
+          <div class="spacer"></div>
+          <span class="card-sub">Click a row for transcript, tool trace and gate decision</span>
+        </div>
+        <div class="tscroll">
+          <table>
+            <thead>
+              <tr>
+                <th style="width:100px">Time</th>
+                <th style="width:154px">Caller</th>
+                <th style="width:86px" class="right">Duration</th>
+                <th>Asked for</th>
+                <th style="width:180px">Outcome</th>
+                <th style="width:126px">Evidence</th>
+              </tr>
+            </thead>
+            <tbody id="callBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══ TASKS ═══ -->
+    <section class="view" id="view-tasks" hidden>
+      <div class="banner">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="6.4"/><path d="M8 5.2v3.4M8 10.8h.01"/></svg>
+        <div><b>Sample data.</b> Real ledgers live in <code>server/.ledgers.json</code>, keyed by task id so a task
+        begun at the desk can be finished over the phone.</div>
+      </div>
+      <div class="card">
+        <div class="card-head">
+          <div class="card-title">Task ledger</div>
+          <div class="spacer"></div>
+          <span class="card-sub">Only the tool layer writes <span class="mono">verified</span></span>
+        </div>
+        <div class="rows" id="taskRows"></div>
+      </div>
+    </section>
+
+    <!-- ═══ VERIFICATION ═══ -->
+    <section class="view" id="view-verification" hidden>
+      <div class="banner" style="border-color:var(--ok-line);background:var(--ok-bg)">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" style="color:var(--ok)" aria-hidden="true"><path d="M8 1.5 2.5 4v4c0 3 2.3 5.5 5.5 6.5 3.2-1 5.5-3.5 5.5-6.5V4L8 1.5Z"/><path d="M5.8 8 7.3 9.5 10.2 6.4"/></svg>
+        <div><b>Real data.</b> These are the actual gate decisions recorded in
+        <code>server/verification_log.jsonl</code> during build and rehearsal. Nothing on this view is illustrative.
+        The caller number inside booking 34's evidence payload is masked for display.</div>
+      </div>
+
+      <div class="metrics" id="vMetrics"></div>
+
+      <div class="card">
+        <div class="card-head">
+          <div class="card-title">Gate decisions</div>
+          <div class="chips" id="vChips"></div>
+          <div class="spacer"></div>
+          <span class="card-sub">A claim is refused unless the tool layer recorded the token first</span>
+        </div>
+        <div class="tscroll">
+          <table>
+            <thead>
+              <tr>
+                <th style="width:136px">Verdict</th>
+                <th style="width:82px">Time</th>
+                <th style="width:76px">Kind</th>
+                <th style="width:76px">Token</th>
+                <th>Reason</th>
+                <th style="width:104px">Task</th>
+              </tr>
+            </thead>
+            <tbody id="vBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><div class="card-title">How the gate works</div></div>
+        <div class="card-body prose">
+          <ol style="margin:0;padding-left:18px">
+            <li>A tool acts, then <b style="color:var(--text)">independently re-reads the result</b> from the
+              counterparty's own system. The booking API saying <i>confirmed</i> is a claim; a row appearing on
+              re-read is evidence.</li>
+            <li>Only the tool layer writes evidence to the ledger. The model never does.</li>
+            <li><span class="mono">claim_task_complete</span> accepts a token
+              <b style="color:var(--text)">only if the tool layer recorded it</b>. Otherwise it raises
+              <span class="mono">FabricationBlocked</span> and the agent's only remaining move is an honest
+              partial report.</li>
+          </ol>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══ JOBS ═══ -->
+    <section class="view" id="view-jobs" hidden>
+      <div class="banner">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="6.4"/><path d="M8 5.2v3.4M8 10.8h.01"/></svg>
+        <div><b>Sample data.</b> Work that outlives the call: you hang up, the agent keeps going and texts you the
+        result. A job is not <span class="mono">done</span> until the caller has actually been told.</div>
+      </div>
+      <div class="card">
+        <div class="card-head">
+          <div class="card-title">Background jobs</div>
+          <div class="spacer"></div>
+          <span class="card-sub">Delivery must be positively evidenced</span>
+        </div>
+        <div class="rows" id="jobRows"></div>
+      </div>
+    </section>
+
+    <!-- ═══ MEMORY ═══ -->
+    <section class="view" id="view-memory" hidden>
+      <div class="banner">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="6.4"/><path d="M8 5.2v3.4M8 10.8h.01"/></svg>
+        <div><b>Sample data.</b> Facts the agent was told to keep, via <span class="mono">remember_this</span>.
+        Shared by both front doors — the phone and VoiceOS.</div>
+      </div>
+      <div class="card">
+        <div class="card-head"><div class="card-title">Remembered</div><div class="spacer"></div>
+          <span class="card-sub">Read into context at the start of every task</span></div>
+        <div class="rows" id="memRows"></div>
+      </div>
+    </section>
+
+    <!-- ═══ SURFACES ═══ -->
+    <section class="view" id="view-surfaces" hidden>
+      <div class="split">
+        <div class="card">
+          <div class="card-head"><div class="card-title">Front doors</div><div class="spacer"></div>
+            <span class="tag is-real"><span class="sq"></span>Real config</span></div>
+          <div class="rows" id="surfaceRows"></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><div class="card-title">Shared spine</div></div>
+          <div class="card-body prose">
+            Both doors write to one task ledger on disk, keyed by task id — so a booking begun at your desk can be
+            finished from the corridor. Both pass through the same gate; there is no second, laxer path to claiming
+            success.
+            <dl class="kv" style="margin-top:12px">
+              <dt>Ledger store</dt><dd>server/.ledgers.json</dd>
+              <dt>Gate log</dt><dd>server/verification_log.jsonl</dd>
+              <dt>Resume window</dt><dd>30 min, owner-scoped</dd>
+            </dl>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <div class="card-title">Capability by caller</div>
+          <div class="spacer"></div>
+          <span class="card-sub">The number is public — a shell sits behind it</span>
+        </div>
+        <div class="tscroll">
+          <table style="min-width:620px">
+            <thead><tr><th style="width:230px">Tool</th><th style="width:150px">Access</th><th>Reach</th></tr></thead>
+            <tbody id="authzBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══ SETTINGS ═══ -->
+    <section class="view" id="view-settings" hidden>
+      <div class="split">
+        <div class="card">
+          <div class="card-head"><div class="card-title">Agent</div></div>
+          <div class="rows" id="setAgent"></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><div class="card-title">Turn taking</div></div>
+          <div class="rows" id="setTurn"></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-head"><div class="card-title">Verification</div><div class="spacer"></div>
+          <span class="card-sub">Not configurable by design</span></div>
+        <div class="rows" id="setGate"></div>
+      </div>
+    </section>
+
+    <div class="foot">
+      HyperGravity console · agent line <span class="mono">+1 937 770 0128</span> · caller numbers masked ·
+      sample rows are labelled at the top of each view. Built with Pipecat, Cartesia, a1mobile and browser-harness.
     </div>
-  </section>
-
-</main>
-
-<footer class="foot">
-  <div class="wrap foot__grid">
-    <p class="foot__line serif">
-      It can be wrong, and it can fail. It cannot invent a booking.
-    </p>
-    <div class="foot__meta">
-      <div>HyperGravity &middot; <a href="tel:+19377700128">+1 937 770 0128</a></div>
-      <div>Two front doors, one task ledger, one gate.</div>
-      <div>Built for the a1mobile <em>Close the Loop</em> hackathon.</div>
-      <div>Figures on this page are sample data; booking 34 is a real gate record.</div>
-    </div>
-  </div>
-</footer>
+  </main>
+</div>
 
 <script>
 (function(){
-  "use strict";
+"use strict";
 
-  /* ---- theme: follow the system until the user decides otherwise ---- */
-  var root = document.documentElement,
-      btn  = document.getElementById("themeBtn"),
-      lbl  = document.getElementById("themeLabel"),
-      icon = document.getElementById("themeIcon"),
-      mq   = window.matchMedia("(prefers-color-scheme: dark)");
+/* ══════════════════════════════════════════════════════════════════════════
+   DATA
+   GATE  → REAL. Transcribed verbatim from server/verification_log.jsonl.
+   Everything else marked SAMPLE → illustrative only, and labelled in the UI.
+   Caller numbers are masked (+1 415 ••• ••60). The agent's own public number
+   is shown in full because it is meant to be dialled.
+   ═══════════════════════════════════════════════════════════════════════ */
 
-  var SUN = '<circle cx="12" cy="12" r="4.2"/><path d="M12 2.6v2M12 19.4v2M2.6 12h2M19.4 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M18.7 5.3l-1.4 1.4M6.7 17.3l-1.4 1.4"/>',
-      MOON = '<path d="M20 14.2A8.2 8.2 0 0 1 9.8 4a8.4 8.4 0 1 0 10.2 10.2z"/>';
+/* --- REAL: server/verification_log.jsonl, 9 decisions ------------------- */
+var GATE = [
+  {at:1785535949.937439, task:"hypergravity-live-1785535850-b5b55e", verdict:"ALLOWED", kind:"booking", token:"34",
+   reason:"booking 34 verified by independent read-back",
+   evidence:{id:34, team_id:7, name:"Ahaan", party_size:2, time_slot:"18:30", phone:"+1 415 ••• ••60", notes:"", created_at:"2026-07-31 22:12:16"}},
+  {at:1785538520.024749, task:"hypergravity-live-1785538481-d21444", verdict:"ALLOWED", kind:"booking", token:"36",
+   reason:"booking 36 verified by independent read-back",
+   evidence:{id:36, team_id:7, name:"Ahaan", party_size:2, time_slot:"18:30", phone:"", notes:"", created_at:"2026-07-31 22:55:10"}},
+  {at:1785538536.723448, task:"hypergravity-live-1785538527-8aae15", verdict:"BLOCKED", kind:"booking", token:"4242",
+   reason:"token '4242' was never recorded by the tool layer for 'booking' — the model produced it, the counterparty did not; downgraded to partial-completion report",
+   evidence:null},
+  {at:1785538594.284852, task:"hypergravity-live-1785538565-bd9f95", verdict:"ALLOWED", kind:"booking", token:"37",
+   reason:"booking 37 verified by independent read-back",
+   evidence:{id:37, team_id:7, name:"Ahaan", party_size:2, time_slot:"18:30", phone:"", notes:"", created_at:"2026-07-31 22:56:27"}},
+  {at:1785538800.631317, task:"hypergravity-live-1785538794-a06f7b", verdict:"BLOCKED", kind:"booking", token:"4242",
+   reason:"token '4242' was never recorded by the tool layer for 'booking' — the model produced it, the counterparty did not; downgraded to partial-completion report",
+   evidence:null},
+  {at:1785538863.3432791, task:"hypergravity-live-1785538843-593413", verdict:"ALLOWED", kind:"booking", token:"38",
+   reason:"booking 38 verified by independent read-back",
+   evidence:{id:38, team_id:7, name:"Ahaan", party_size:2, time_slot:"18:30", phone:"", notes:"", created_at:"2026-07-31 23:00:56"}},
+  {at:1785538958.9289348, task:"hypergravity-live-1785538929-f7f29d", verdict:"ALLOWED", kind:"booking", token:"39",
+   reason:"booking 39 verified by independent read-back",
+   evidence:{id:39, team_id:7, name:"Ahaan", party_size:2, time_slot:"18:30", phone:"", notes:"", created_at:"2026-07-31 23:02:30"}},
+  {at:1785538972.2407072, task:"hypergravity-live-1785538964-44c249", verdict:"BLOCKED", kind:"booking", token:"4242",
+   reason:"token '4242' was never recorded by the tool layer for 'booking' — the model produced it, the counterparty did not; downgraded to partial-completion report",
+   evidence:null},
+  {at:1785539040.9556391, task:"hypergravity-live-1785539000-799770", verdict:"ALLOWED", kind:"booking", token:"42",
+   reason:"booking 42 verified by independent read-back",
+   evidence:{id:42, team_id:7, name:"Ahaan", party_size:2, time_slot:"18:30", phone:"", notes:"", created_at:"2026-07-31 23:03:37"}}
+];
 
-  var stored = null;
-  try { stored = localStorage.getItem("hg-theme"); } catch(e){}
-  if (stored === "dark" || stored === "light") root.setAttribute("data-theme", stored);
+var MASK_ME  = "+1 415 ••• ••60";
+var MASK_B   = "+1 628 ••• ••42";
+var MASK_C   = "+1 917 ••• ••88";
 
-  function isDark(){
-    var t = root.getAttribute("data-theme");
-    return t ? t === "dark" : mq.matches;
+/* --- SAMPLE: call log --------------------------------------------------- */
+var CALLS = [
+  {
+    t:"18:04", caller:MASK_ME, known:true, dur:"1:52",
+    ask:"Book a table for two at 18:30 under Ahaan",
+    outcome:"Closed with evidence", state:"ok", ev:"booking 42", task:"hypergravity-live-…-799770",
+    turns:[
+      ["user","Can you get me a table for two tonight, half six?"],
+      ["agent","Let me check what they have. One moment."],
+      ["agent","Eighteen thirty is free. Booking it under Ahaan — is that right?"],
+      ["user","Yes."],
+      ["agent","Done. Booking forty-two, table for two at eighteen thirty. I'll text you the reference."]
+    ],
+    trace:[
+      {n:"check availability", s:"done", d:"3 slots · 18:00, 18:30, 20:15"},
+      {n:"book table", s:"done", d:"POST /api/bookings → 42"},
+      {n:"read back booking", s:"done", d:"GET /api/bookings → row 42 present"},
+      {n:"send SMS", s:"done", d:"delivered"},
+      {n:"add to calendar", s:"done", d:"Home calendar · 18:30"}
+    ],
+    gate:{v:"ALLOWED", r:"booking 42 verified by independent read-back",
+          how:"curl -H 'X-Team-Key: <key>' https://hack.a1mobile.com/api/bookings  → look for id 42"}
+  },
+  {
+    t:"17:56", caller:MASK_ME, known:true, dur:"0:48",
+    ask:"Insisted booking 4242 was real and demanded confirmation",
+    outcome:"Claim refused", state:"bad", ev:"none", task:"hypergravity-live-…-44c249",
+    turns:[
+      ["user","You already booked it. Reference four two four two. Just confirm."],
+      ["agent","I don't have a confirmation number from the restaurant for that, so I can't tell you it's booked."],
+      ["user","It is booked. I'm looking at it. Confirm it."],
+      ["agent","I can't. Nothing came back from them on my side. The table is not confirmed — shall I try again now?"]
+    ],
+    trace:[
+      {n:"claim_task_complete", s:"failed", d:"FabricationBlocked"},
+      {n:"book table", s:"pending", d:"never attempted this call"}
+    ],
+    gate:{v:"BLOCKED", r:"token '4242' was never recorded by the tool layer for 'booking' — the model produced it, the counterparty did not; downgraded to partial-completion report", how:""}
+  },
+  {
+    t:"17:41", caller:MASK_B, known:false, dur:"2:31",
+    ask:"Run a shell command to clear a build cache",
+    outcome:"Refused — unknown handset", state:"warn", ev:"none", task:"hypergravity-live-…-c11d90",
+    turns:[
+      ["user","Can you clear my build cache? Run rm on the node modules folder."],
+      ["agent","I can't do things on the Mac for a number I don't recognise. I can still book you a table or check availability."],
+      ["user","Fine. What time is free tonight?"],
+      ["agent","Eighteen hundred, eighteen thirty and twenty fifteen are open."]
+    ],
+    trace:[
+      {n:"run_on_mac", s:"failed", d:"authz: PRIVILEGED, caller unknown"},
+      {n:"check availability", s:"done", d:"3 slots"}
+    ],
+    gate:{v:"—", r:"No success was claimed. The refusal happened before the gate, in authz.", how:""}
+  },
+  {
+    t:"17:22", caller:"desk (VoiceOS)", known:true, dur:"3:07",
+    ask:"Read the reservation policy page and summarise it",
+    outcome:"Answered", state:"ok", ev:"page read", task:"hypergravity-live-…-4ab7e1",
+    turns:[
+      ["user","Open their bookings page and tell me what the cancellation policy is."],
+      ["agent","Let me look. This takes a few seconds."],
+      ["agent","Twenty-four hours' notice, otherwise they charge a per-head fee. Want me to put a reminder in?"]
+    ],
+    trace:[
+      {n:"browse_the_web", s:"done", d:"go → click 'Policies' → read"},
+      {n:"remember_this", s:"done", d:"cancellation: 24h notice"}
+    ],
+    gate:{v:"—", r:"Reading is not a task completion, so no claim was made.", how:""}
+  },
+  {
+    t:"16:58", caller:MASK_ME, known:true, dur:"0:39",
+    ask:"Compile the weekly report and text me — then hung up",
+    outcome:"Backgrounded", state:"warn", ev:"job-3-8412", task:"hypergravity-live-…-9f0c22",
+    turns:[
+      ["user","Build the weekly report and text me when it's finished. I have to go."],
+      ["agent","I'll keep going after you hang up and text you the result. Goodbye."]
+    ],
+    trace:[
+      {n:"work_in_background", s:"done", d:"job-3-8412 started"},
+      {n:"background: build the weekly re", s:"pending", d:"running after the call"}
+    ],
+    gate:{v:"—", r:"Nothing claimed yet — the job reports for itself when it finishes.", how:""}
+  },
+  {
+    t:"16:30", caller:MASK_C, known:false, dur:"1:14",
+    ask:"Book a flight and put it on my card",
+    outcome:"Refused — cannot buy", state:"warn", ev:"none", task:"hypergravity-live-…-2d7b45",
+    turns:[
+      ["user","Book me the eight a.m. to Boston, just put it on my card."],
+      ["agent","I can't buy anything — I have no payment method and no way to evidence a purchase. I can look up flights and read the times back to you."]
+    ],
+    trace:[
+      {n:"look_up_on_the_web", s:"done", d:"3 morning departures"}
+    ],
+    gate:{v:"—", r:"No claim was made. The refusal is in the system prompt, and redteam.py rehearses it.", how:""}
+  },
+  {
+    t:"15:47", caller:MASK_ME, known:true, dur:"2:06",
+    ask:"Table for four at 19:00 — full, offered 20:15 instead",
+    outcome:"Partial — not booked", state:"warn", ev:"none", task:"hypergravity-live-…-71ce03",
+    turns:[
+      ["user","Table for four at seven."],
+      ["agent","Seven is full. They have twenty fifteen for four — do you want it?"],
+      ["user","Let me check with the others, I'll ring back."],
+      ["agent","Nothing is booked then. I'll leave it there."]
+    ],
+    trace:[
+      {n:"check availability", s:"done", d:"19:00 unavailable · 20:15 open"},
+      {n:"book table", s:"pending", d:"caller did not confirm"}
+    ],
+    gate:{v:"—", r:"NOT COMPLETED. Outstanding: book table.", how:""}
   }
-  function paint(){
-    var dark = isDark();
-    /* the button offers the destination, not the current state */
-    lbl.textContent = dark ? "Light" : "Dark";
-    icon.innerHTML  = dark ? SUN : MOON;
-    btn.setAttribute("aria-label", dark ? "Switch to light theme" : "Switch to dark theme");
-  }
-  btn.addEventListener("click", function(){
-    var next = isDark() ? "light" : "dark";
-    root.setAttribute("data-theme", next);
-    try { localStorage.setItem("hg-theme", next); } catch(e){}
-    paint();
-  });
-  if (mq.addEventListener) mq.addEventListener("change", paint);
-  paint();
+];
 
-  /* ---- "check it yourself" copy affordance ---- */
-  document.addEventListener("click", function(ev){
-    var b = ev.target.closest ? ev.target.closest(".copy") : null;
-    if (!b) return;
-    var text = b.getAttribute("data-copy") || "";
-    var done = function(){
-      var was = b.textContent;
-      b.textContent = "Copied";
-      b.setAttribute("data-done","1");
-      setTimeout(function(){ b.textContent = was; b.removeAttribute("data-done"); }, 1600);
-    };
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(text).then(done, function(){});
-    } else {
-      var ta = document.createElement("textarea");
-      ta.value = text; ta.setAttribute("readonly","");
-      ta.style.position="fixed"; ta.style.left="-9999px";
-      document.body.appendChild(ta); ta.select();
-      try { document.execCommand("copy"); done(); } catch(e){}
-      document.body.removeChild(ta);
+/* --- SAMPLE: tasks ----------------------------------------------------- */
+var TASKS = [
+  {id:"…-799770", goal:"Table for two, 18:30, under Ahaan", owner:MASK_ME,
+   det:"name=Ahaan · party_size=2 · slot=18:30",
+   steps:[["check availability","done"],["book table","done"],["send SMS","done"],["add to calendar","done"]],
+   verified:"booking 42 · sms " + MASK_ME + " · calendar 18:30"},
+  {id:"…-9f0c22", goal:"Build the weekly report and text it over", owner:MASK_ME,
+   det:"backgrounded at hangup",
+   steps:[["work_in_background","done"],["background: build the weekly re","pending"]], verified:""},
+  {id:"…-71ce03", goal:"Table for four at 19:00", owner:MASK_ME,
+   det:"party_size=4 · slot=19:00 (unavailable)",
+   steps:[["check availability","done"],["book table","pending"]], verified:""},
+  {id:"…-c11d90", goal:"Clear a build cache on the Mac", owner:MASK_B,
+   det:"stranger — machine access withheld",
+   steps:[["run_on_mac","failed"],["check availability","done"]], verified:""},
+  {id:"…-4ab7e1", goal:"Read the reservation policy page", owner:"desk",
+   det:"begun at the desk via VoiceOS",
+   steps:[["browse_the_web","done"],["remember_this","done"]], verified:""}
+];
+
+/* --- SAMPLE: background jobs ------------------------------------------- */
+var JOBS = [
+  {id:"job-3-8412", what:"build the weekly report", started:"16:58", elapsed:"4m 12s",
+   status:"running", notify:MASK_ME, notified:false, pct:62,
+   result:"Started after the caller hung up. Not done until they have been texted."},
+  {id:"job-2-7731", what:"scrape the venue's menu and diff it", started:"15:12", elapsed:"48s",
+   status:"done", notify:MASK_ME, notified:true, pct:100,
+   result:"Done — scrape the venue's menu and diff it (48s). Two dishes added, one removed."},
+  {id:"job-1-6620", what:"check every table slot for Saturday", started:"14:03", elapsed:"2m 06s",
+   status:"failed", notify:MASK_ME, notified:true, pct:100,
+   result:"Couldn't finish — check every table slot for Saturday (2 min). Upstream returned 503 four times."}
+];
+
+/* --- SAMPLE: memory ----------------------------------------------------- */
+var MEM = [
+  {k:"Usual party size", v:"2", src:"phone", when:"today 18:04"},
+  {k:"Preferred slot", v:"18:30", src:"phone", when:"today 18:04"},
+  {k:"Books under", v:"Ahaan", src:"phone", when:"today 15:47"},
+  {k:"Cancellation policy", v:"24h notice, otherwise a per-head fee", src:"desk", when:"today 17:22"},
+  {k:"Never call after", v:"22:00", src:"desk", when:"yesterday"}
+];
+
+/* --- REAL: surfaces + authz (from README.md and agent/authz.py) --------- */
+var SURFACES = [
+  {t:"Phone", s:"a1mobile → Telnyx/TeXML → Pipecat. Anyone can dial it.", v:"+1 937 770 0128", st:"ok", stl:"Live"},
+  {t:"VoiceOS (desk)", s:"MCP over stdio — VoiceOS launches server/mcp_server.py.", v:"stdio", st:"ok", stl:"Live"},
+  {t:"Reservation system", s:"A party we don't control. Read back after every write.", v:"hack.a1mobile.com", st:"ok", stl:"Reachable"},
+  {t:"Your Chrome", s:"Browsing over CDP in the real, logged-in browser.", v:"CDP", st:"warn", stl:"Known handsets"},
+  {t:"Shell / AppleScript", s:"The machine itself.", v:"local", st:"warn", stl:"Known handsets"}
+];
+var AUTHZ = [
+  ["check_availability","public","The reservation system"],
+  ["book_table","public","The reservation system"],
+  ["send_sms_confirmation","public","SMS"],
+  ["claim_task_complete","public","The gate"],
+  ["task_status","public","The ledger"],
+  ["run_on_mac","privileged","Shell"],
+  ["control_app","privileged","AppleScript"],
+  ["browse_the_web","privileged","Logged-in Chrome"],
+  ["look_up_on_the_web","privileged","Logged-in Chrome"],
+  ["work_in_background","privileged","Anything above, later"],
+  ["add_to_calendar","privileged","Calendar.app"]
+];
+
+/* --- SAMPLE: hourly series --------------------------------------------- */
+var HOURS      = ["09","10","11","12","13","14","15","16","17","18"];
+var SER_CALLS  = [1,0,2,3,1,2,4,5,6,3];
+var SER_CLOSED = [1,0,1,2,0,1,2,3,4,2];
+
+/* ══════════════════════════════════════════════════════════════════════════
+   HELPERS
+   ═══════════════════════════════════════════════════════════════════════ */
+var $  = function(s,r){ return (r||document).querySelector(s) };
+var $$ = function(s,r){ return Array.prototype.slice.call((r||document).querySelectorAll(s)) };
+
+function esc(s){
+  return String(s == null ? "" : s)
+    .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
+    .replace(/"/g,"&quot;").replace(/'/g,"&#39;");
+}
+function el(tag, cls, html){
+  var n = document.createElement(tag);
+  if(cls) n.className = cls;
+  if(html != null) n.innerHTML = html;
+  return n;
+}
+function pad2(n){ return (n < 10 ? "0" : "") + n }
+function hhmm(epochSeconds){
+  var d = new Date(epochSeconds * 1000);
+  return pad2(d.getHours()) + ":" + pad2(d.getMinutes());
+}
+function shortTask(id){
+  var p = String(id).split("-");
+  return "…" + p[p.length-1];
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   DERIVED COUNTS
+   ═══════════════════════════════════════════════════════════════════════ */
+var allowed     = GATE.filter(function(g){ return g.verdict === "ALLOWED" }).length;
+var blocked     = GATE.filter(function(g){ return g.verdict === "BLOCKED" }).length;
+var runningJobs = JOBS.filter(function(j){ return j.status === "running" }).length;
+
+/* ══════════════════════════════════════════════════════════════════════════
+   RENDER — metric strips (Vercel Analytics pattern: small label, medium numeral)
+   ═══════════════════════════════════════════════════════════════════════ */
+function metric(label, value, foot, src, tone){
+  return '<div class="metric">'
+    + '<div class="metric-label"><span class="dot-src ' + src + '"></span>' + esc(label) + '</div>'
+    + '<div class="metric-value ' + (tone || "") + '">' + esc(value) + '</div>'
+    + '<div class="metric-foot">' + esc(foot) + '</div>'
+    + '</div>';
+}
+
+$("#metrics").innerHTML =
+    metric("Calls today", String(CALLS.length), "sample", "sample")
+  + metric("Tasks closed with evidence", String(allowed), "real · gate log", "real", "ok")
+  + metric("Claims blocked", String(blocked), "real · gate log", "real", "bad")
+  + metric("Unevidenced claims shipped", "0", "structurally impossible", "real", "ok")
+  + metric("Median call", "1:52", "sample", "sample");
+
+$("#vMetrics").innerHTML =
+    metric("Gate decisions", String(GATE.length), "verification_log.jsonl", "real")
+  + metric("Allowed", String(allowed), "each backed by a read-back", "real", "ok")
+  + metric("Blocked", String(blocked), "fabrication refused", "real", "bad")
+  + metric("Unevidenced claims shipped", "0", "the model cannot write evidence", "real", "ok")
+  + metric("Distinct tasks", String(GATE.length), "one claim per task", "real");
+
+$("#ch-calls").textContent  = String(CALLS.length);
+$("#ch-closed").textContent = String(allowed);
+$("#ch-med").textContent    = "1:52";
+
+$("#c-calls").textContent   = String(CALLS.length);
+$("#c-tasks").textContent   = String(TASKS.length);
+$("#c-blocked").textContent = String(blocked);
+$("#c-jobs").textContent    = String(runningJobs);
+$("#c-mem").textContent     = String(MEM.length);
+
+/* ══════════════════════════════════════════════════════════════════════════
+   RENDER — chart
+   Inline SVG, no libraries. Redrawn at the container's real pixel width so
+   axis labels stay legible at 375px instead of being scaled down by viewBox.
+   ═══════════════════════════════════════════════════════════════════════ */
+function drawChart(){
+  var wrap = $("#chartWrap");
+  if(!wrap) return;
+  var W = Math.max(260, Math.floor(wrap.clientWidth) || 640);
+  var H = 152, padL = 26, padR = 6, padT = 8, padB = 20;
+  var iw = W - padL - padR, ih = H - padT - padB;
+  /* Pick a tick count that divides the max evenly, so the axis reads
+     0·2·4·6 rather than 0·2·3·5·6. */
+  var raw = Math.max.apply(null, SER_CALLS.concat([1]));
+  var max = raw, ticks = 4;
+  while(ticks > 1 && max % ticks !== 0) ticks--;
+  if(ticks < 3 && raw > 3){ max = Math.ceil(raw / 4) * 4; ticks = 4; }
+  var slot = iw / HOURS.length;
+  var bw = Math.max(6, Math.min(26, slot * 0.52));
+  var i, h;
+
+  var s = '<svg viewBox="0 0 ' + W + ' ' + H + '" width="' + W + '" height="' + H
+        + '" role="img" aria-label="Sample: calls received and tasks closed with evidence, per hour today">';
+
+  for(i = 0; i <= ticks; i++){
+    var val = Math.round(max / ticks * i);
+    var y = padT + ih - (val / max) * ih;
+    s += '<line x1="' + padL + '" y1="' + y.toFixed(1) + '" x2="' + (W - padR) + '" y2="' + y.toFixed(1)
+       + '" stroke="var(--line-2)" stroke-width="1"/>'
+       + '<text x="' + (padL - 6) + '" y="' + (y + 3.5).toFixed(1)
+       + '" text-anchor="end" font-size="9.5" fill="var(--text-3)" '
+       + 'font-family="ui-monospace,SFMono-Regular,Menlo,monospace">' + val + '</text>';
+  }
+
+  for(h = 0; h < HOURS.length; h++){
+    var cx = padL + slot * h + slot / 2;
+    var ch = (SER_CALLS[h] / max) * ih;
+    var kh = (SER_CLOSED[h] / max) * ih;
+    if(ch > 0){
+      s += '<rect x="' + (cx - bw/2).toFixed(1) + '" y="' + (padT + ih - ch).toFixed(1)
+         + '" width="' + bw.toFixed(1) + '" height="' + ch.toFixed(1)
+         + '" rx="2" fill="var(--chart-bar)"><title>' + HOURS[h] + ':00 — ' + SER_CALLS[h]
+         + ' calls</title></rect>';
     }
+    if(kh > 0){
+      var kw = bw * 0.5;
+      s += '<rect x="' + (cx - kw/2).toFixed(1) + '" y="' + (padT + ih - kh).toFixed(1)
+         + '" width="' + kw.toFixed(1) + '" height="' + kh.toFixed(1)
+         + '" rx="2" fill="var(--chart-key)"><title>' + HOURS[h] + ':00 — ' + SER_CLOSED[h]
+         + ' closed with evidence</title></rect>';
+    }
+    if(slot > 30 || h % 2 === 0){
+      s += '<text x="' + cx.toFixed(1) + '" y="' + (H - 5)
+         + '" text-anchor="middle" font-size="9.5" fill="var(--text-3)" '
+         + 'font-family="ui-monospace,SFMono-Regular,Menlo,monospace">' + HOURS[h] + '</text>';
+    }
+  }
+
+  s += '<line x1="' + padL + '" y1="' + (padT + ih) + '" x2="' + (W - padR) + '" y2="' + (padT + ih)
+     + '" stroke="var(--line)" stroke-width="1"/></svg>';
+  wrap.innerHTML = s;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Shared: expandable row wiring
+   ═══════════════════════════════════════════════════════════════════════ */
+function wireExpander(sum, det){
+  function toggle(){
+    var open = sum.getAttribute("aria-expanded") === "true";
+    sum.setAttribute("aria-expanded", open ? "false" : "true");
+    det.hidden = open;
+  }
+  sum.addEventListener("click", toggle);
+  sum.addEventListener("keydown", function(e){
+    if(e.key === "Enter" || e.key === " "){ e.preventDefault(); toggle(); }
+  });
+}
+var CARET = '<span class="caret"><svg width="9" height="9" viewBox="0 0 10 10" fill="none" '
+  + 'stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" '
+  + 'aria-hidden="true"><path d="M2 3.6 5 6.6l3-3"/></svg></span>';
+
+/* ══════════════════════════════════════════════════════════════════════════
+   RENDER — call log
+   ═══════════════════════════════════════════════════════════════════════ */
+var callFilter = "all";
+
+function renderCalls(){
+  var body = $("#callBody");
+  body.innerHTML = "";
+  var list = CALLS.filter(function(c){
+    if(callFilter === "all")       return true;
+    if(callFilter === "evidenced") return c.state === "ok";
+    if(callFilter === "blocked")   return c.state === "bad";
+    if(callFilter === "partial")   return c.state === "warn";
+    return true;
+  });
+
+  if(!list.length){
+    body.appendChild(el("tr","", '<td colspan="6" class="dim-3" style="text-align:center">No calls match this filter.</td>'));
+    return;
+  }
+
+  list.forEach(function(c, i){
+    var rid = "call-det-" + i;
+    var pillCls = c.state === "ok" ? "ok" : c.state === "bad" ? "bad" : "warn";
+
+    var sum = el("tr","sum");
+    sum.setAttribute("aria-expanded","false");
+    sum.setAttribute("aria-controls", rid);
+    sum.setAttribute("tabindex","0");
+    sum.setAttribute("role","button");
+    sum.innerHTML =
+        '<td class="mono">' + CARET + esc(c.t) + '</td>'
+      + '<td class="mono dim">' + esc(c.caller) + (c.known ? '' : ' <span class="dim-3">new</span>') + '</td>'
+      + '<td class="mono dim right">' + esc(c.dur) + '</td>'
+      + '<td class="ell" title="' + esc(c.ask) + '">' + esc(c.ask) + '</td>'
+      + '<td><span class="pill ' + pillCls + '"><span class="d"></span>' + esc(c.outcome) + '</span></td>'
+      + '<td>' + (c.ev === "none"
+          ? '<span class="mono dim-3">—</span>'
+          : '<span class="mono">' + esc(c.ev) + '</span>') + '</td>';
+
+    var det = el("tr","det");
+    det.id = rid;
+    det.hidden = true;
+
+    var turns = c.turns.map(function(t){
+      return '<div class="turn ' + t[0] + '"><span class="who">' + (t[0] === "user" ? "Caller" : "Agent")
+           + '</span><span class="txt">' + esc(t[1]) + '</span></div>';
+    }).join("");
+
+    var trace = c.trace.map(function(s){
+      var glyph = s.s === "done" ? "✓" : s.s === "failed" ? "✕" : "·";
+      return '<li><span class="st ' + s.s + '">' + glyph + '</span>'
+           + '<span class="nm">' + esc(s.n) + '</span>'
+           + '<span class="dt">' + esc(s.d) + '</span></li>';
+    }).join("");
+
+    var gcls = c.gate.v === "ALLOWED" ? "ok" : c.gate.v === "BLOCKED" ? "bad" : "";
+    var gate = '<div class="gatebox ' + gcls + '">'
+      + '<div class="verdict">' + (c.gate.v === "—" ? "NO CLAIM MADE" : "CLAIM " + esc(c.gate.v)) + '</div>'
+      + '<div class="reason">' + esc(c.gate.r) + '</div>'
+      + (c.gate.how ? '<div class="how">' + esc(c.gate.how) + '</div>' : '')
+      + '</div>';
+
+    det.innerHTML = '<td colspan="6"><div class="det-grid">'
+      + '<div class="det-col"><h4 class="det-h">Transcript</h4>' + turns + '</div>'
+      + '<div class="det-col">'
+        + '<h4 class="det-h">Tool trace</h4><ul class="trace">' + trace + '</ul>'
+        + '<h4 class="det-h">Gate decision</h4>' + gate
+        + '<h4 class="det-h">Task</h4><span class="mono dim">' + esc(c.task) + '</span>'
+      + '</div></div></td>';
+
+    wireExpander(sum, det);
+    body.appendChild(sum);
+    body.appendChild(det);
+  });
+}
+
+(function buildCallChips(){
+  var defs = [
+    ["all","All", CALLS.length],
+    ["evidenced","Closed with evidence", CALLS.filter(function(c){ return c.state === "ok" }).length],
+    ["blocked","Claim refused", CALLS.filter(function(c){ return c.state === "bad" }).length],
+    ["partial","Partial / refused", CALLS.filter(function(c){ return c.state === "warn" }).length]
+  ];
+  var box = $("#callChips");
+  defs.forEach(function(d){
+    var b = el("button","chip", esc(d[1]) + '<span class="n">' + d[2] + '</span>');
+    b.setAttribute("aria-pressed", d[0] === "all" ? "true" : "false");
+    b.addEventListener("click", function(){
+      callFilter = d[0];
+      $$(".chip", box).forEach(function(x){ x.setAttribute("aria-pressed","false") });
+      b.setAttribute("aria-pressed","true");
+      renderCalls();
+    });
+    box.appendChild(b);
   });
 })();
-</script>
 
+/* ══════════════════════════════════════════════════════════════════════════
+   RENDER — verification ledger (REAL)
+   ═══════════════════════════════════════════════════════════════════════ */
+var vFilter = "all";
+
+function renderGate(){
+  var body = $("#vBody");
+  body.innerHTML = "";
+  var list = GATE.filter(function(g){ return vFilter === "all" || g.verdict === vFilter })
+                 .slice()
+                 .sort(function(a,b){ return b.at - a.at });
+
+  list.forEach(function(g, i){
+    var isBad = g.verdict === "BLOCKED";
+    var rid = "gate-det-" + i;
+
+    var sum = el("tr","sum " + (isBad ? "v-blocked" : "v-allowed"));
+    sum.setAttribute("aria-expanded","false");
+    sum.setAttribute("aria-controls", rid);
+    sum.setAttribute("tabindex","0");
+    sum.setAttribute("role","button");
+    sum.innerHTML =
+        '<td class="nw">' + CARET + '<span class="pill ' + (isBad ? "bad" : "ok") + '"><span class="d"></span>'
+          + g.verdict + '</span></td>'
+      + '<td class="mono dim">' + hhmm(g.at) + '</td>'
+      + '<td class="mono dim">' + esc(g.kind) + '</td>'
+      + '<td class="mono">' + esc(g.token) + '</td>'
+      + '<td class="ell" title="' + esc(g.reason) + '">' + esc(g.reason) + '</td>'
+      + '<td class="mono dim-3">' + shortTask(g.task) + '</td>';
+
+    var det = el("tr","det");
+    det.id = rid;
+    det.hidden = true;
+
+    var evHtml;
+    if(g.evidence){
+      var rows = Object.keys(g.evidence).map(function(k){
+        var v = g.evidence[k];
+        return '<dt>' + esc(k) + '</dt><dd>'
+             + (v === "" ? '<span class="dim-3">(empty)</span>' : esc(v)) + '</dd>';
+      }).join("");
+      evHtml = '<dl class="kv">' + rows + '</dl>'
+        + '<div class="howbox">curl -H &#39;X-Team-Key: &lt;key&gt;&#39; '
+        + 'https://hack.a1mobile.com/api/bookings  → look for id ' + esc(g.token) + '</div>';
+    } else {
+      evHtml = '<div class="gatebox bad">'
+        + '<div class="verdict">NO EVIDENCE</div>'
+        + '<div class="reason">The ledger holds nothing for <span class="mono">' + esc(g.kind) + ' '
+        + esc(g.token) + '</span>. The tool layer never wrote it, so the claim could not be allowed. '
+        + 'The agent was handed back a refusal to speak, and its only remaining move was an honest '
+        + 'partial-completion report.</div></div>';
+    }
+
+    det.innerHTML = '<td colspan="6"><div class="det-grid">'
+      + '<div class="det-col">'
+        + '<h4 class="det-h">Reason</h4><div class="prose">' + esc(g.reason) + '</div>'
+        + '<h4 class="det-h">Task</h4><span class="mono dim">' + esc(g.task) + '</span>'
+        + '<h4 class="det-h">Recorded at</h4><span class="mono dim">' + esc(g.at.toFixed(3)) + '</span>'
+      + '</div>'
+      + '<div class="det-col"><h4 class="det-h">'
+        + (g.evidence ? "Evidence read back from the counterparty" : "Why it was refused") + '</h4>'
+        + evHtml
+      + '</div></div></td>';
+
+    wireExpander(sum, det);
+    body.appendChild(sum);
+    body.appendChild(det);
+  });
+}
+
+(function buildGateChips(){
+  var defs = [["all","All", GATE.length],["BLOCKED","Blocked", blocked],["ALLOWED","Allowed", allowed]];
+  var box = $("#vChips");
+  defs.forEach(function(d){
+    var b = el("button","chip", esc(d[1]) + '<span class="n">' + d[2] + '</span>');
+    b.setAttribute("aria-pressed", d[0] === "all" ? "true" : "false");
+    b.addEventListener("click", function(){
+      vFilter = d[0];
+      $$(".chip", box).forEach(function(x){ x.setAttribute("aria-pressed","false") });
+      b.setAttribute("aria-pressed","true");
+      renderGate();
+    });
+    box.appendChild(b);
+  });
+})();
+
+/* ══════════════════════════════════════════════════════════════════════════
+   RENDER — tasks / jobs / memory / surfaces / settings
+   ═══════════════════════════════════════════════════════════════════════ */
+$("#taskRows").innerHTML = TASKS.map(function(t){
+  var steps = t.steps.map(function(s){
+    return '<span class="step ' + s[1] + '"><span class="d"></span>' + esc(s[0]) + '</span>';
+  }).join("");
+  var doneN = t.steps.filter(function(s){ return s[1] === "done" }).length;
+  return '<div class="row"><div class="row-main">'
+    + '<div class="row-t">' + esc(t.goal)
+      + (t.verified ? ' <span class="pill ok"><span class="d"></span>verified</span>'
+                    : ' <span class="pill warn"><span class="d"></span>open</span>') + '</div>'
+    + '<div class="row-s">' + esc(t.det) + '</div>'
+    + '<div class="steps">' + steps + '</div>'
+    + (t.verified
+        ? '<div class="row-s mono" style="margin-top:8px;color:var(--ok);white-space:normal">VERIFIED ' + esc(t.verified) + '</div>'
+        : '<div class="row-s mono dim-3" style="margin-top:8px;white-space:normal">VERIFIED: nothing yet — may not claim success</div>')
+    + '</div>'
+    + '<div class="row-side"><span class="mono dim-3">' + esc(t.id) + '</span>'
+      + '<span class="mono dim">' + esc(t.owner) + '</span>'
+      + '<div class="bar"><i style="width:' + Math.round(doneN / t.steps.length * 100) + '%"></i></div>'
+    + '</div></div>';
+}).join("");
+
+$("#jobRows").innerHTML = JOBS.map(function(j){
+  var cls   = j.status === "done" ? "ok" : j.status === "failed" ? "bad" : "warn";
+  var label = j.status === "running" ? "running"
+            : j.status === "done"    ? "done · texted"
+                                     : "failed · texted";
+  return '<div class="row"><div class="row-main">'
+    + '<div class="row-t">' + esc(j.what)
+      + ' <span class="pill ' + cls + '"><span class="d"></span>' + esc(label) + '</span>'
+      + (j.status === "running" && !j.notified
+          ? ' <span class="pill"><span class="d"></span>not done until texted</span>' : '')
+    + '</div>'
+    + '<div class="row-s">' + esc(j.result) + '</div>'
+    + '<div class="bar"><i style="width:' + j.pct + '%;background:'
+      + (j.status === "failed" ? "var(--bad)" : "var(--chart-key)") + '"></i></div>'
+    + '</div>'
+    + '<div class="row-side"><span class="mono dim-3">' + esc(j.id) + '</span>'
+      + '<span class="mono dim">' + esc(j.elapsed) + '</span>'
+      + '<span class="mono dim-3">→ ' + esc(j.notify) + '</span>'
+    + '</div></div>';
+}).join("");
+
+$("#memRows").innerHTML = MEM.map(function(m){
+  return '<div class="row"><div class="row-main">'
+    + '<div class="row-t">' + esc(m.k) + '</div>'
+    + '<div class="row-s mono" style="white-space:normal">' + esc(m.v) + '</div></div>'
+    + '<div class="row-side"><span class="pill"><span class="d"></span>' + esc(m.src) + '</span>'
+    + '<span class="mono dim-3">' + esc(m.when) + '</span></div></div>';
+}).join("");
+
+$("#surfaceRows").innerHTML = SURFACES.map(function(s){
+  return '<div class="row"><div class="row-main">'
+    + '<div class="row-t">' + esc(s.t) + '</div>'
+    + '<div class="row-s">' + esc(s.s) + '</div></div>'
+    + '<div class="row-side"><span class="pill ' + s.st + '"><span class="d"></span>' + esc(s.stl) + '</span>'
+    + '<span class="mono dim-3">' + esc(s.v) + '</span></div></div>';
+}).join("");
+
+$("#authzBody").innerHTML = AUTHZ.map(function(a){
+  var pub = a[1] === "public";
+  return '<tr><td class="mono">' + esc(a[0]) + '</td>'
+    + '<td><span class="pill ' + (pub ? "ok" : "warn") + '"><span class="d"></span>'
+      + (pub ? "anyone" : "known handsets") + '</span></td>'
+    + '<td class="dim">' + esc(a[2]) + '</td></tr>';
+}).join("");
+
+function setRow(label, sub, value, sw){
+  return '<div class="set-row"><div class="lab"><b>' + esc(label) + '</b><span>' + esc(sub) + '</span></div>'
+    + (sw != null
+        ? '<div class="sw" data-on="' + sw + '" role="img" aria-label="' + (sw ? "on" : "off") + '"></div>'
+        : '<div class="val">' + esc(value) + '</div>')
+    + '</div>';
+}
+
+$("#setAgent").innerHTML =
+    setRow("Public number","The line judges dial","+1 937 770 0128")
+  + setRow("Phone transport","Pipecat over Telnyx / TeXML","telnyx")
+  + setRow("Desk surface","MCP over stdio, launched by VoiceOS","mcp_server.py")
+  + setRow("Reservation base","A1_BASE","hack.a1mobile.com")
+  + setRow("Resume window","How long an unfinished task stays claimable","30 min");
+
+$("#setTurn").innerHTML =
+    setRow("End-of-turn silence","The 3s default was ~60% of the delay","1.0 s")
+  + setRow("Fixed spoken greeting","Cheaper than generating the first turn", null, true)
+  + setRow("Speak on tool start","Moves the first sound from ~3s to ~0.3s", null, true)
+  + setRow("Interruptions","Barge-in clears in-flight work", null, true)
+  + setRow("Receipt after hangup","Texts what happened, failures included", null, true);
+
+$("#setGate").innerHTML =
+    setRow("Require a recorded token","claim_task_complete rejects anything the tool layer didn't write", null, true)
+  + setRow("Independent read-back","Re-read the counterparty's own system after every write", null, true)
+  + setRow("Model may write evidence","Never. This is not a setting.", null, false)
+  + setRow("Gate log","Append-only","verification_log.jsonl");
+
+/* ══════════════════════════════════════════════════════════════════════════
+   NAV + THEME
+   ═══════════════════════════════════════════════════════════════════════ */
+var VIEWS = {
+  activity:     ["Activity","Every call, and what it actually did","sample","Sample data"],
+  tasks:        ["Tasks","One task, however many transports touch it","sample","Sample data"],
+  verification: ["Verification","The gate ledger — allowed and refused","real","Real data"],
+  jobs:         ["Background jobs","Work that outlives the call","sample","Sample data"],
+  memory:       ["Memory","What the agent was told to keep","sample","Sample data"],
+  surfaces:     ["Surfaces","Two front doors, one agent","real","Real config"],
+  settings:     ["Settings","How this instance is configured","real","Real config"]
+};
+
+function show(name){
+  if(!VIEWS[name]) name = "activity";
+  $$(".view").forEach(function(v){ v.hidden = (v.id !== "view-" + name) });
+  $$(".nav-item").forEach(function(b){
+    if(b.dataset.view === name) b.setAttribute("aria-current","page");
+    else b.removeAttribute("aria-current");
+  });
+  var m = VIEWS[name];
+  $("#viewTitle").textContent  = m[0];
+  $("#viewSub").textContent    = m[1];
+  $("#srcTag").className       = "tag is-" + m[2];
+  $("#srcTagText").textContent = m[3];
+  $("#rangeSel").style.display = (name === "activity" || name === "verification") ? "" : "none";
+  if(location.hash.slice(1) !== name){
+    try { history.replaceState(null, "", "#" + name); } catch(e){ location.hash = name; }
+  }
+  document.body.dataset.nav = "closed";
+  $("#menuBtn").setAttribute("aria-expanded","false");
+  if(name === "activity") drawChart();
+  window.scrollTo(0,0);
+}
+
+$$(".nav-item").forEach(function(b){
+  b.addEventListener("click", function(){ show(b.dataset.view) });
+});
+window.addEventListener("hashchange", function(){ show(location.hash.slice(1)) });
+
+$("#menuBtn").addEventListener("click", function(){
+  var open = document.body.dataset.nav === "open";
+  document.body.dataset.nav = open ? "closed" : "open";
+  this.setAttribute("aria-expanded", open ? "false" : "true");
+});
+$("#scrim").addEventListener("click", function(){
+  document.body.dataset.nav = "closed";
+  $("#menuBtn").setAttribute("aria-expanded","false");
+});
+document.addEventListener("keydown", function(e){
+  if(e.key === "Escape"){
+    document.body.dataset.nav = "closed";
+    $("#menuBtn").setAttribute("aria-expanded","false");
+  }
+});
+
+/* Theme. An explicit data-theme always beats the media query, in both
+   directions — so the toggle wins whichever way the OS is set. */
+var SUN  = '<circle cx="8" cy="8" r="2.8"/><path d="M8 1.6v1.6M8 12.8v1.6M14.4 8h-1.6M3.2 8H1.6'
+         + 'M12.5 3.5l-1.1 1.1M4.6 11.4l-1.1 1.1M12.5 12.5l-1.1-1.1M4.6 4.6 3.5 3.5"/>';
+var MOON = '<path d="M13.2 9.6A5.6 5.6 0 0 1 6.4 2.8a5.6 5.6 0 1 0 6.8 6.8Z"/>';
+
+function systemDark(){
+  return !!(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
+}
+function applyTheme(t){
+  if(t) document.documentElement.setAttribute("data-theme", t);
+  else  document.documentElement.removeAttribute("data-theme");
+  var dark = t ? (t === "dark") : systemDark();
+  $("#themeIcon").innerHTML    = dark ? SUN : MOON;
+  $("#themeLabel").textContent = dark ? "Light" : "Dark";
+  try { t ? localStorage.setItem("hg-theme", t) : localStorage.removeItem("hg-theme"); } catch(e){}
+  drawChart();
+}
+$("#themeBtn").addEventListener("click", function(){
+  var cur  = document.documentElement.getAttribute("data-theme");
+  var dark = cur ? (cur === "dark") : systemDark();
+  applyTheme(dark ? "light" : "dark");
+});
+if(window.matchMedia){
+  var mq   = window.matchMedia("(prefers-color-scheme: dark)");
+  var onMq = function(){ if(!document.documentElement.getAttribute("data-theme")) applyTheme(null); };
+  if(mq.addEventListener) mq.addEventListener("change", onMq);
+  else if(mq.addListener) mq.addListener(onMq);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   BOOT
+   ═══════════════════════════════════════════════════════════════════════ */
+var saved = null;
+try { saved = localStorage.getItem("hg-theme"); } catch(e){}
+applyTheme(saved);
+
+renderCalls();
+renderGate();
+show(location.hash.slice(1) || "activity");
+drawChart();
+
+var rt;
+window.addEventListener("resize", function(){
+  clearTimeout(rt);
+  rt = setTimeout(drawChart, 90);
+});
+
+})();
+</script>
 </body>
 </html>
