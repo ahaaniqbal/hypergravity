@@ -99,7 +99,14 @@ class MacSession:
                     for c in result.get("content", [])
                     if c.get("type") == "text"
                 ]
-                return "\n".join(p for p in parts if p).strip()
+                text = "\n".join(p for p in parts if p).strip()
+                # The server flags a failed tool with isError on the result;
+                # msg["error"] only ever carries transport failures. Ignoring it
+                # is how a batch that stopped at step one came back looking
+                # exactly like one that ran.
+                if result.get("isError"):
+                    raise MacError(f"{tool}: {text[:200] or 'failed'}")
+                return text
 
     async def aclose(self) -> None:
         if self._proc and self._proc.returncode is None:
@@ -267,11 +274,25 @@ async def use_app(app: str, actions: list[dict[str, Any]]) -> str:
     return f"Did [{', '.join(described)}] in {app}.\n\n{after[:1200]}"
 
 
-_FAILURE_MARKERS = ("APP_NOT_FOUND", "is not running", "NOT_FOUND", "no windows")
+# The server has an open vocabulary of failures — AMBIGUOUS_TARGET,
+# CONFIRMATION_REQUIRED, OFFSCREEN_TARGET, USER_INTERFERENCE, ELEMENT_NOT_FOUND,
+# "is disabled; no click was performed", "Batch stopped at step", "No visible UI
+# change followed this action", "AXError cannotComplete". A denylist over that
+# will always be one release behind, and each gap is a confident lie about
+# something that did not happen.
+_FAILURE_MARKERS = (
+    "APP_NOT_FOUND", "is not running", "NOT_FOUND", "no windows",
+    "AMBIGUOUS_TARGET", "CONFIRMATION_REQUIRED", "OFFSCREEN_TARGET",
+    "USER_INTERFERENCE", "DAEMON_UNAUTHORIZED", "ELEMENT_NOT_FOUND",
+    "stopped at step", "is disabled", "No visible UI change",
+    "did not change to the requested value", "Could not confirm the typed text",
+    "AXError", "cannotComplete", "not authorised", "not authorized",
+)
 
 
 def _looks_like_failure(text: str) -> bool:
-    return any(marker in (text or "") for marker in _FAILURE_MARKERS)
+    lowered = (text or "").lower()
+    return any(marker.lower() in lowered for marker in _FAILURE_MARKERS)
 
 
 _ELEMENT_ID = re.compile(r"\b(e\d+@s\d+)\b")

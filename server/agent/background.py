@@ -26,7 +26,7 @@ from typing import Any, Awaitable, Callable
 from loguru import logger
 
 from . import events
-from .counterparty import Counterparty
+from .counterparty import Counterparty, sms_delivered as _sms_delivered
 from .ledger import StepState, get_ledger
 
 MAX_SMS_BODY = 300
@@ -91,9 +91,10 @@ async def _notify(job: Job) -> None:
     try:
         body = _phrase(job)
         resp = await cp.send_confirmation_sms(to=job.notify, body=body)
-        prose = str(resp.get("_text", ""))
-        if "error" in prose.lower() or "not allowed" in prose.lower():
-            logger.error(f"job {job.job_id} could not text {job.notify}: {prose}")
+        # Delivery must be positively evidenced. "No known error word in a
+        # field that is usually absent" is not evidence of anything.
+        if not _sms_delivered(resp):
+            logger.error(f"job {job.job_id} could not text {job.notify}: {resp}")
         else:
             logger.info(f"job {job.job_id} texted {job.notify}: {body[:60]}")
             get_ledger(job.task_id).record_evidence(

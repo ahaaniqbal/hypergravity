@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from loguru import logger
 
-from .counterparty import Counterparty
+from .counterparty import Counterparty, sms_delivered
 from .ledger import Ledger, StepState
 
 MAX_SMS = 320
@@ -69,9 +69,8 @@ async def send(ledger: Ledger) -> bool:
     cp = Counterparty()
     try:
         resp = await cp.send_confirmation_sms(to=to, body=body)
-        prose = str(resp.get("_text", ""))
-        if "error" in prose.lower() or "not allowed" in prose.lower():
-            logger.warning(f"receipt not delivered to {to}: {prose}")
+        if not sms_delivered(resp):
+            logger.warning(f"receipt not delivered to {to}: {resp}")
             return False
         logger.info(f"receipt texted to {to}: {body[:70]}")
         return True

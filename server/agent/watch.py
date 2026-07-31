@@ -26,7 +26,7 @@ from typing import Awaitable, Callable
 from loguru import logger
 
 from . import events
-from .counterparty import Counterparty
+from .counterparty import Counterparty, sms_delivered as _sms_delivered
 from .ledger import get_ledger
 
 DEFAULT_EVERY = 120
@@ -76,8 +76,9 @@ async def _notify(watch: Watch, body: str) -> None:
     cp = Counterparty()
     try:
         resp = await cp.send_confirmation_sms(to=watch.notify, body=body[:300])
-        prose = str(resp.get("_text", ""))
-        if "error" in prose.lower() or "not allowed" in prose.lower():
+        # Delivery must be positively evidenced. "No known error word in a
+        # field that is usually absent" is not evidence of anything.
+        if not _sms_delivered(resp):
             logger.error(f"{watch.watch_id} couldn't text {watch.notify}: {prose}")
         else:
             logger.info(f"{watch.watch_id} texted: {body[:70]}")

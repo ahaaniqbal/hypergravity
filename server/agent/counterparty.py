@@ -113,8 +113,22 @@ class Counterparty:
             raise CounterpartyError(f"{tool}: {payload['error']}")
 
         result = payload.get("result", {})
+
+        # MCP reports a *tool* failure with isError on the result, not as a
+        # JSON-RPC error. Ignoring it meant a refused SMS came back looking
+        # exactly like a delivered one, and the ledger recorded evidence for a
+        # text that never went.
+        if result.get("isError"):
+            detail = " ".join(
+                b.get("text", "") for b in result.get("content", [])
+            ).strip()
+            raise CounterpartyError(f"{tool}: {detail[:200] or 'refused'}")
+
         if structured := result.get("structuredContent"):
-            return structured
+            # Keep the prose alongside the structured body: callers sniff _text
+            # for refusals that arrive as a 200 with an explanation.
+            prose = " ".join(b.get("text", "") for b in result.get("content", []))
+            return {**structured, "_text": prose.strip()} if prose.strip() else structured
         for block in result.get("content", []):
             text = block.get("text", "")
             if text.strip().startswith("{"):
@@ -196,3 +210,20 @@ class Counterparty:
 
     async def point_number(self, webhook_url: str) -> dict[str, Any]:
         return await self._call("point_number", webhook_url=webhook_url)
+
+
+def sms_delivered(resp: dict) -> bool:
+    """Did the text actually go?
+
+    Proven by an identifier the service returned, never by the absence of a
+    known error word — the field those words arrive in is missing entirely on
+    the structured-response path, so the old check passed for every refusal.
+    """
+    if not isinstance(resp, dict):
+        return False
+    prose = str(resp.get("_text", "")).lower()
+    if any(bad in prose for bad in ("error", "not allowed", "failed", "undeliverable")):
+        return False
+    if resp.get("error") or resp.get("success") is False:
+        return False
+    return bool(resp.get("message_id") or resp.get("sid") or resp.get("sent") is True)

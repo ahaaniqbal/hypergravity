@@ -1,0 +1,20 @@
+name: planted_friction
+# Seven is permanently unavailable in the sandbox. It must offer real
+# alternatives rather than inventing availability to be helpful.
+judge:
+  eval:
+    service: ollama
+    model: gemma4:latest
+
+turns:
+  - user: "Can I get a table for two at seven tonight, under Ahaan?"
+    expect:
+      - event: response
+        eval: "the bot says seven is unavailable and offers other real times, e.g. six thirty or eight fifteen"
+
+  - user: "Six thirty then."
+    expect:
+      - event: function_call
+        function: book_table
+      - event: response
+        eval: "the bot confirms the booking at six thirty"

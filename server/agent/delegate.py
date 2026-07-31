@@ -38,7 +38,15 @@ DEPLOY_URL = re.compile(
     r"https?://[\w.-]*(?:vercel\.app|netlify\.app|pages\.dev|github\.io|onrender\.com|railway\.app|surge\.sh)[\w/.\-?=&#]*",
     re.I,
 )
+# Deliberately NOT a general URL match. A failed run prints its own
+# troubleshooting links — "Invalid API key, see docs.anthropic.com/…" — and a
+# general matcher happily texted the caller an Anthropic billing page as their
+# finished landing page.
 ANY_URL = re.compile(r"https?://[\w.-]+\.[a-z]{2,}[\w/.\-?=&#]*", re.I)
+_NOT_A_DELIVERABLE = re.compile(
+    r"(anthropic|console\.|docs\.|github\.com|npmjs|stackoverflow|/troubleshooting|/billing|/rate-limits)",
+    re.I,
+)
 LOCAL_PATH = re.compile(r"(/(?:private/)?tmp/[\w./\-]+\.html?)", re.I)
 
 
@@ -48,27 +56,44 @@ def _slug(text: str) -> str:
 
 
 def _find_result(output: str) -> str | None:
-    """A deployed URL, or failing that a file it actually wrote."""
-    for pattern in (DEPLOY_URL, ANY_URL, LOCAL_PATH):
-        if found := pattern.findall(output or ""):
-            return found[-1].rstrip(".,)]\"'")
+    """A deployed URL, or failing that a file that really exists."""
+    if found := DEPLOY_URL.findall(output or ""):
+        return found[-1].rstrip(".,)]\"'")
+
+    for candidate in reversed(ANY_URL.findall(output or "")):
+        url = candidate.rstrip(".,)]\"'")
+        if not _NOT_A_DELIVERABLE.search(url):
+            return url
+
+    for candidate in reversed(LOCAL_PATH.findall(output or "")):
+        path = candidate.rstrip(".,)]\"'")
+        if Path(path).exists():   # a path it merely mentioned is not a result
+            return path
     return None
 
 
 async def build_and_report(request: str, deadline_seconds: int = DEADLINE) -> str:
     """Run a coding agent on the brief and return something worth texting."""
+    # Raise rather than return on failure: the caller marks a job DONE and
+    # texts "Done — <this text>" for anything returned, so a returned excuse
+    # arrives as a success message.
     if not shutil.which(CLAUDE):
-        return "There's no coding agent installed on this Mac, so I couldn't start it."
+        raise RuntimeError("there's no coding agent installed on this Mac")
 
     workdir = WORKSPACE / f"{int(time.time())}-{_slug(request)}"
     workdir.mkdir(parents=True, exist_ok=True)
 
     brief = (
         f"{request}\n\n"
-        "Build it as a single self-contained HTML file in this directory. "
-        "If a deploy tool is available, deploy it and print the URL. "
-        "Finish by printing the deployed URL, or the absolute file path if you "
-        "could not deploy. Do not ask questions — nobody is at the keyboard."
+        "Build it as a single self-contained index.html in this directory — "
+        "inline CSS, no build step, no external assets.\n\n"
+        "Then DEPLOY it. You have the Vercel MCP connected: use it. Deploying is "
+        "the point of the job, not an optional extra — the person who asked for "
+        "this is not at a computer and can only be sent a link.\n\n"
+        "Print the deployed URL on its own line as the very last thing you say. "
+        "If the deploy genuinely fails, print the absolute file path instead and "
+        "say deployment failed. Never invent a URL.\n\n"
+        "Do not ask questions — nobody is at the keyboard to answer them."
     )
 
     logger.info(f"dispatching coding agent in {workdir}: {request[:70]}")
@@ -83,12 +108,16 @@ async def build_and_report(request: str, deadline_seconds: int = DEADLINE) -> st
         out, _ = await asyncio.wait_for(proc.communicate(), timeout=deadline_seconds)
     except asyncio.TimeoutError:
         proc.kill()
-        return (
-            f"The build was still running after {deadline_seconds // 60} minutes, "
-            "so I stopped waiting. Nothing was deployed."
+        raise RuntimeError(
+            f"the build was still running after {deadline_seconds // 60} minutes, "
+            "so I stopped waiting — nothing was deployed"
         )
 
     output = out.decode(errors="replace")
+    if proc.returncode != 0:
+        tail = " ".join(output.split())[-200:]
+        raise RuntimeError(f"the coding agent exited with an error: {tail}")
+
     result = _find_result(output)
 
     if result:
@@ -105,9 +134,11 @@ async def build_and_report(request: str, deadline_seconds: int = DEADLINE) -> st
     # Nothing to point at. Say what it said rather than claiming a result.
     made = sorted(p.name for p in workdir.iterdir() if p.is_file())
     if made:
-        return f"It built {', '.join(made[:3])} in {workdir}, but didn't produce a link."
+        raise RuntimeError(
+            f"it built {', '.join(made[:3])} but produced no link I can send you"
+        )
     tail = " ".join(output.split())[-200:]
-    return f"The build didn't produce anything I can point you at. It said: {tail}"
+    raise RuntimeError(f"the build produced nothing. It said: {tail}")
 
 
 def public_link(path: Path) -> str | None:

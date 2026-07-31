@@ -71,3 +71,13 @@ def gate(verdict: str, reason: str, token: str = "") -> None:
 
 def evidence(kind: str, token: str, how_to_check: str) -> None:
     emit("evidence", evidence_kind=kind, token=token, how_to_check=how_to_check)
+
+
+def reset() -> None:
+    """Clear the replay buffer at the start of a call.
+
+    A judge opening the panel mid-call is replayed the history first. Without
+    this they see the *previous* caller's steps, gate verdicts and booking
+    references — someone else's data on screen.
+    """
+    _history.clear()

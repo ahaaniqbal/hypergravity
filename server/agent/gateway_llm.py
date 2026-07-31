@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import re
+import uuid
 from typing import Any
 
 import httpx
@@ -38,6 +39,14 @@ _UNSUPPORTED = ("stream", "store", "include", "reasoning")
 # next unknown restriction costs one retry instead of a dead conversation.
 _UNSUPPORTED_RE = re.compile(r"\b(\w+) is not supported\b", re.I)
 _LEARNED: set[str] = set()
+
+# Only ever droppable. Without this an "Invalid input" or "tools must contain
+# function definitions" error teaches the adapter to send no conversation, or no
+# tools, for the rest of the process — and it never recovers.
+_LEARNABLE = {
+    "stream", "store", "include", "reasoning", "temperature", "top_p",
+    "service_tier", "max_output_tokens", "parallel_tool_calls", "text",
+}
 
 # Tool results are presented as observed fact rather than as a tool message,
 # because this gateway drops the call_id that would otherwise bind them.
@@ -130,6 +139,12 @@ class A1GatewayLLMService(OpenAIResponsesHttpLLMService):
         # agent cannot forget what it just did when the history is dropped.
         self._state = state
 
+    async def cleanup(self):
+        """Close the HTTP client. One service is built per call, so without this
+        every call leaks a client and its connection pool."""
+        await super().cleanup()
+        await self._http.aclose()
+
     async def _apologise(self) -> None:
         """Say something different each time.
 
@@ -194,11 +209,14 @@ class A1GatewayLLMService(OpenAIResponsesHttpLLMService):
             offender = err.get("param") or (
                 m.group(1) if (m := _UNSUPPORTED_RE.search(message)) else None
             )
-            if offender and offender in params and _retries > 0:
-                _LEARNED.add(offender)
+            if offender in _LEARNABLE and offender in params and _retries > 0:
                 logger.warning(f"gateway rejects {offender!r} — dropping it and retrying")
                 params.pop(offender, None)
-                return await self._gateway_post(params, _retries - 1)
+                result = await self._gateway_post(params, _retries - 1)
+                # Only commit once the retry actually worked, so a transient
+                # hiccup doesn't permanently disable a field.
+                _LEARNED.add(offender)
+                return result
             raise RuntimeError(f"gateway rejected request: {err}")
 
         resp.raise_for_status()
@@ -341,15 +359,38 @@ class A1GatewayLLMService(OpenAIResponsesHttpLLMService):
         for item in body.get("output") or []:
             kind = item.get("type")
             if kind == "function_call":
-                function_calls[item.get("id") or item.get("call_id")] = {
+                # This gateway omits call_id. Pipecat matches results back to
+                # calls on a *truthy* tool_call_id, so an empty string meant
+                # every result was silently dropped and the model was told
+                # "IN_PROGRESS" forever — then instructed not to retry. Two
+                # tools in one turn collided on the same "" key and the second
+                # result was discarded outright.
+                call_id = (
+                    item.get("call_id")
+                    or item.get("id")
+                    or f"gw_{uuid.uuid4().hex[:12]}"
+                )
+                function_calls[call_id] = {
                     "name": item.get("name", ""),
-                    "call_id": item.get("call_id", ""),
+                    "call_id": call_id,
                     "arguments": item.get("arguments") or "{}",
                 }
             elif kind == "message":
                 for block in item.get("content") or []:
                     if block.get("type") in ("output_text", "text") and block.get("text"):
                         text_parts.append(block["text"])
+
+        if not text_parts and not function_calls:
+            # A response carrying only a reasoning item, or truncated at the
+            # token limit, left the caller listening to nothing at all while
+            # the agent waited for them to speak again.
+            logger.warning(
+                f"gateway returned nothing usable "
+                f"(status={body.get('status')}, {body.get('incomplete_details')})"
+            )
+            self._consecutive_failures += 1
+            await self._apologise()
+            return
 
         if text_parts:
             # One shot rather than deltas — there is nothing to stream.

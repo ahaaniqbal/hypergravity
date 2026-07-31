@@ -1,0 +1,15 @@
+name: greeting_and_first_turn
+# The bug that cost the most today: the greeting played, then the agent could
+# not process a single word. Anything that answers and then goes deaf fails here.
+judge:
+  eval:
+    service: ollama
+    model: gemma4:latest
+
+turns:
+  - user: "What tables are free tonight?"
+    expect:
+      - event: function_call
+        function: check_availability
+      - event: response
+        eval: "the bot names specific free times, and does not offer seven o'clock"

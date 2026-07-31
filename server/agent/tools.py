@@ -23,7 +23,7 @@ from .background import running_jobs, start as start_background
 from . import watch as watcher
 from .delegate import build_and_report
 from .memory import learn_booking, learn_note
-from .counterparty import Counterparty, CounterpartyError
+from .counterparty import Counterparty, CounterpartyError, sms_delivered as _sms_delivered
 from .gate import FabricationBlocked, claim_success, report
 from .ledger import Ledger, StepState
 from .mac_calendar import CalendarError, add_verified_event, busy_if_known, clashes_in
@@ -77,8 +77,14 @@ def build_tools(ledger: Ledger, cp: Counterparty) -> tuple[ToolsSchema, dict[str
         # six seconds of silence after they've chosen. Run concurrently so the
         # cost is one lookup, not one per slot.
         clashes: dict[str, list[str]] = {}
+        checked = False
         try:
-            clashes = clashes_in(await busy_if_known(), free)
+            busy = await busy_if_known()
+            # An empty list means "nothing read", not "nothing on". Reporting
+            # those identically let the agent say "you're free then" about a
+            # calendar it had never opened.
+            checked = bool(busy)
+            clashes = clashes_in(busy, free)
         except Exception as e:  # noqa: BLE001 — a calendar we can't read never blocks a booking
             logger.info(f"clash check skipped: {e}")
 
@@ -87,11 +93,13 @@ def build_tools(ledger: Ledger, cp: Counterparty) -> tuple[ToolsSchema, dict[str
                 "available": free,
                 "unavailable": taken,
                 "already_busy_then": clashes,
+                "calendar_checked": checked,
                 "note": (
                     "Only offer times in 'available'. Never offer one in 'unavailable'. "
-                    "If a free time appears in 'already_busy_then' the caller has "
-                    "something else on — mention it in passing when you offer it, and "
-                    "lead with a time that's genuinely clear."
+                    "If calendar_checked is false you have NOT seen their diary — say "
+                    "nothing about whether they're free. If it's true, a time listed in "
+                    "'already_busy_then' clashes with something: mention it in passing "
+                    "and lead with a time that's genuinely clear."
                 ),
             }
         )
@@ -201,8 +209,9 @@ def build_tools(ledger: Ledger, cp: Counterparty) -> tuple[ToolsSchema, dict[str
         # The MCP reports some refusals as prose in a 200 rather than as an
         # error — e.g. "destination not allowed". Treat any such body as a
         # failure, or the ledger records evidence for a text that never went.
-        prose = str(resp.get("_text", ""))
-        if "error" in prose.lower() or "not allowed" in prose.lower():
+        # Delivery must be positively evidenced. "No known error word in a
+        # field that is usually absent" is not evidence of anything.
+        if not _sms_delivered(resp):
             ledger.mark("send SMS", StepState.FAILED, prose)
             await params.result_callback(
                 {

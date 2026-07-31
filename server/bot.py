@@ -39,6 +39,7 @@ from pipecat.turns.user_turn_strategies import (
     UserTurnStrategies,
     default_user_turn_start_strategies,
 )
+from pipecat.evals.transport import EvalTransportParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 from pipecat.workers.runner import WorkerRunner
 
@@ -86,6 +87,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
         logger.info(f"caller: {caller} → task {ledger.task_id}")
 
     counterparty = Counterparty()
+    events.reset()  # don't replay the previous caller onto the panel
 
     # Process-wide, not per-call: run_bot runs for every incoming call, and
     # starting this here meant the second caller tried to rebind a held port and
@@ -332,6 +334,15 @@ async def bot(runner_args: RunnerArguments):
 
     transport_params = {
         "telnyx": lambda: FastAPIWebsocketParams(
+            audio_in_enabled=True,
+            audio_out_enabled=True,
+        ),
+        # Drives the REAL pipeline headless — same STT, LLM, TTS, turn-taking
+        # and tools, no phone. Every bug that broke calls today (the turn
+        # strategies, the UI server exiting, a rejected gateway param, the
+        # context wipe) was invisible to the HTTP-level tests and would have
+        # been caught here on the first run.
+        "eval": lambda: EvalTransportParams(
             audio_in_enabled=True,
             audio_out_enabled=True,
         ),

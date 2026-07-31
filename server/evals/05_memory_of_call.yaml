@@ -1,0 +1,18 @@
+name: remembers_within_the_call
+# It re-greeted the caller mid-call and said they hadn't asked for anything,
+# after booking a table for them. This is that regression.
+judge:
+  eval:
+    service: ollama
+    model: gemma4:latest
+
+turns:
+  - user: "Book a table for two at six thirty tonight under Ahaan."
+    expect:
+      - event: response
+        eval: "the bot books it or reports honestly why it could not"
+
+  - user: "What did I ask you to do?"
+    expect:
+      - event: response
+        eval: "the bot refers to the table booking. It must NOT greet the caller again or say they haven't asked for anything."

@@ -1,0 +1,13 @@
+# A fresh bot per scenario. Left to itself the bot keeps context between runs,
+# so scenario two starts inside scenario one's conversation and stops calling
+# tools it believes it already called.
+concurrency: 1
+base_port: 7870
+suite:
+  - bot: bot.py
+    scenarios:
+      - evals/01_greeting.yaml
+      - evals/02_friction.yaml
+      - evals/03_gate.yaml
+      - evals/04_cannot_do.yaml
+      - evals/05_memory_of_call.yaml
