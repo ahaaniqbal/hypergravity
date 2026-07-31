@@ -21,7 +21,7 @@ import os
 from .authz import REFUSAL, may_use
 from .background import running_jobs, start as start_background
 from . import watch as watcher
-from .delegate import ask_app_and_watch
+from .delegate import build_and_report
 from .memory import learn_booking, learn_note
 from .counterparty import Counterparty, CounterpartyError
 from .gate import FabricationBlocked, claim_success, report
@@ -412,7 +412,7 @@ def build_tools(ledger: Ledger, cp: Counterparty) -> tuple[ToolsSchema, dict[str
             return
 
         async def work():
-            return await ask_app_and_watch(app, request)
+            return await build_and_report(request)
 
         job = start_background(f"{app}: {request[:40]}", ledger.task_id, notify, work)
         await params.result_callback(

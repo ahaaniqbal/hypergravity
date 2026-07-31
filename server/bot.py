@@ -374,7 +374,20 @@ def _install_texml_route() -> None:
             media_type="application/xml",
         )
 
-    logger.info(f"TeXML also served on POST /ws → wss://{proxy}/ws")
+    # Serve anything a build produced, so a text can carry a real link instead
+    # of a path on a laptop the recipient is nowhere near.
+    from fastapi.responses import FileResponse, PlainTextResponse
+    from agent.delegate import WORKSPACE
+
+    @app.get("/build/{path:path}")
+    async def serve_build(path: str):
+        target = (WORKSPACE / path).resolve()
+        # Never serve outside the build directory, whatever the path says.
+        if not str(target).startswith(str(WORKSPACE.resolve())) or not target.is_file():
+            return PlainTextResponse("not found", status_code=404)
+        return FileResponse(target)
+
+    logger.info(f"TeXML on POST /ws, builds on GET /build/… → https://{proxy}/build/")
 
 
 if __name__ == "__main__":

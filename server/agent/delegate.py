@@ -1,135 +1,126 @@
-"""Hand a job to another agent on the Mac, and text back what it produced.
+"""Hand a build job to a real coding agent, and text back what it produced.
 
-The shape this was built for: you're out, you ring your Mac, you ask for a
-landing page. It types the request into Claude Desktop — which has its own
-tools and its own Vercel connection — you hang up, and a few minutes later the
-deployed URL arrives as a text.
+The shape this exists for: you're out, you ring your Mac, you ask for a landing
+page. A coding agent runs headless on the machine, writes the files, deploys if
+it can, and the URL arrives as a text a few minutes later.
 
-What makes this more than "type and hope" is the watching. The job polls the
-app's accessibility tree for a URL that wasn't there when it started, and only
-texts once it has one. If nothing appears before the deadline it says so. There
-is no version of this that invents a link, because the link is only ever read
-off the screen — never composed.
+The first version typed the brief into Claude Desktop and watched the screen.
+That failed for a reason worth recording: the composer is a web view, so the
+accessibility tree exposes no editable field at all. The keystrokes went
+nowhere, the previous message stayed in the box, and — because delivering a
+keystroke is not the same as sending a message — it reported success and waited
+for a URL that could never arrive.
+
+``claude -p`` needs none of that. No focus, no window, no pixels: a process with
+real output we can read. What gets texted is taken from that output, never
+composed, so there is no path by which this invents a link.
 """
 
 from __future__ import annotations
 
 import asyncio
+import os
 import re
+import shutil
+import subprocess
 import time
+from pathlib import Path
 
 from loguru import logger
 
-from .mac_agent import MacError, session, use_app
+CLAUDE = shutil.which("claude") or "claude"
+WORKSPACE = Path("/tmp/hypergravity-builds")
+DEADLINE = 12 * 60
 
 # Deployment hosts worth reporting. A bare http:// match picks up documentation
-# links and analytics pixels, which is worse than finding nothing.
-URL_PATTERN = re.compile(
-    r"https?://[\w.-]*(?:vercel\.app|netlify\.app|pages\.dev|github\.io|onrender\.com|railway\.app)[\w/.\-?=&#]*",
+# links and package registries, which is worse than finding nothing.
+DEPLOY_URL = re.compile(
+    r"https?://[\w.-]*(?:vercel\.app|netlify\.app|pages\.dev|github\.io|onrender\.com|railway\.app|surge\.sh)[\w/.\-?=&#]*",
     re.I,
 )
 ANY_URL = re.compile(r"https?://[\w.-]+\.[a-z]{2,}[\w/.\-?=&#]*", re.I)
-
-POLL_SECONDS = 20
-DEFAULT_DEADLINE = 12 * 60
+LOCAL_PATH = re.compile(r"(/(?:private/)?tmp/[\w./\-]+\.html?)", re.I)
 
 
-async def _was_submitted(app: str, request: str) -> bool:
-    """Did the message actually go, or is it still sitting in the input box?
-
-    Checked by looking for a distinctive chunk of our own text in an editable
-    field. Once sent, the box empties and the words move into the transcript, so
-    finding them still in an input means nothing was submitted.
-    """
-    await asyncio.sleep(2)
-    state = await _visible_text(app)
-    if not state:
-        return True  # can't tell; don't block on a reading we didn't get
-
-    probe = " ".join(request.split()[:6]).lower()
-    for line in state.splitlines():
-        lowered = line.lower()
-        editable = any(k in line for k in ("AXTextArea", "AXTextField", "AXComboBox"))
-        if editable and probe and probe in lowered:
-            return False
-    return True
+def _slug(text: str) -> str:
+    words = re.findall(r"[a-z0-9]+", text.lower())[:4]
+    return "-".join(words) or "build"
 
 
-async def _visible_text(app: str) -> str:
-    try:
-        return await session().call(
-            "get_app_state", app=app, include_screenshot=False, max_elements=400
-        )
-    except MacError as e:
-        logger.info(f"couldn't read {app}: {e}")
-        return ""
-
-
-def _find_url(text: str, ignore: set[str]) -> str | None:
-    for pattern in (URL_PATTERN, ANY_URL):
-        for match in pattern.findall(text or ""):
-            url = match.rstrip(".,)]\"'")
-            if url not in ignore:
-                return url
+def _find_result(output: str) -> str | None:
+    """A deployed URL, or failing that a file it actually wrote."""
+    for pattern in (DEPLOY_URL, ANY_URL, LOCAL_PATH):
+        if found := pattern.findall(output or ""):
+            return found[-1].rstrip(".,)]\"'")
     return None
 
 
-async def ask_app_and_watch(
-    app: str,
-    request: str,
-    deadline_seconds: int = DEFAULT_DEADLINE,
-) -> str:
-    """Type a request into an app, then wait for a URL to appear.
+async def build_and_report(request: str, deadline_seconds: int = DEADLINE) -> str:
+    """Run a coding agent on the brief and return something worth texting."""
+    if not shutil.which(CLAUDE):
+        return "There's no coding agent installed on this Mac, so I couldn't start it."
 
-    Returns something worth texting. Everything it says is read off the screen.
+    workdir = WORKSPACE / f"{int(time.time())}-{_slug(request)}"
+    workdir.mkdir(parents=True, exist_ok=True)
+
+    brief = (
+        f"{request}\n\n"
+        "Build it as a single self-contained HTML file in this directory. "
+        "If a deploy tool is available, deploy it and print the URL. "
+        "Finish by printing the deployed URL, or the absolute file path if you "
+        "could not deploy. Do not ask questions — nobody is at the keyboard."
+    )
+
+    logger.info(f"dispatching coding agent in {workdir}: {request[:70]}")
+    proc = await asyncio.create_subprocess_exec(
+        CLAUDE, "-p", brief, "--permission-mode", "acceptEdits",
+        cwd=str(workdir),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+
+    try:
+        out, _ = await asyncio.wait_for(proc.communicate(), timeout=deadline_seconds)
+    except asyncio.TimeoutError:
+        proc.kill()
+        return (
+            f"The build was still running after {deadline_seconds // 60} minutes, "
+            "so I stopped waiting. Nothing was deployed."
+        )
+
+    output = out.decode(errors="replace")
+    result = _find_result(output)
+
+    if result:
+        logger.info(f"build produced {result}")
+        # A local path is useless in a text message. We already have a public
+        # tunnel pointing at this machine, so anything built here can be served
+        # over it — a real link they can open from the pavement, without
+        # depending on a deploy service being wired up.
+        if not result.startswith("http"):
+            if link := public_link(Path(result)):
+                return f"Done — {link}"
+        return f"Done — {result}"
+
+    # Nothing to point at. Say what it said rather than claiming a result.
+    made = sorted(p.name for p in workdir.iterdir() if p.is_file())
+    if made:
+        return f"It built {', '.join(made[:3])} in {workdir}, but didn't produce a link."
+    tail = " ".join(output.split())[-200:]
+    return f"The build didn't produce anything I can point you at. It said: {tail}"
+
+
+def public_link(path: Path) -> str | None:
+    """A URL for a file we just built, served over the tunnel we already have.
+
+    The alternative is texting someone an absolute path on a laptop they are
+    nowhere near.
     """
-    before = await _visible_text(app)
-    # Anything already on screen is not this job's output. Without this the very
-    # first poll returns a URL from whatever was open before, and the caller gets
-    # a confident text pointing at last week's work.
-    already = set(ANY_URL.findall(before))
-
-    # New conversation first. Typing into whatever happened to be open would
-    # land the request in the middle of someone else's thread — including,
-    # cheerfully, the one they're using to build this.
-    result = await use_app(
-        app,
-        [
-            {"key": "cmd+n"},
-            {"type": request},
-            {"key": "return"},
-        ],
-    )
-    if not result.startswith("Did ["):
-        return f"Couldn't hand that to {app} — {result[:150]}"
-
-    # Delivering the keystroke is not the same as sending the message. The first
-    # version reported success on the strength of "we pressed Return", then sat
-    # watching for a URL from a request still sitting unsent in the box. If our
-    # text is still on screen, it did not go.
-    if not await _was_submitted(app, request):
-        logger.warning(f"{app}: request typed but not sent — retrying submit")
-        await session().call("press_key", app=app, key="enter", include_state=False)
-        await asyncio.sleep(2)
-        if not await _was_submitted(app, request):
-            return (
-                f"I typed it into {app} but couldn't get it to send — the message "
-                "is sitting in the box. Press return on it and I'll pick it up."
-            )
-
-    logger.info(f"delegated to {app}, watching for a link: {request[:60]}")
-    started = time.time()
-
-    while time.time() - started < deadline_seconds:
-        await asyncio.sleep(POLL_SECONDS)
-        text = await _visible_text(app)
-        if url := _find_url(text, already):
-            mins = int((time.time() - started) / 60)
-            logger.info(f"{app} produced {url} after {mins}m")
-            return f"{app} finished: {url}"
-
-    mins = int(deadline_seconds / 60)
-    return (
-        f"{app} was still working after {mins} minutes and hadn't produced a link. "
-        f"It may still finish — have a look when you're back."
-    )
+    host = os.getenv("TUNNEL_HOST", "").strip()
+    if not host or not path.exists():
+        return None
+    try:
+        rel = path.resolve().relative_to(WORKSPACE.resolve())
+    except ValueError:
+        return None
+    return f"https://{host}/build/{rel}"

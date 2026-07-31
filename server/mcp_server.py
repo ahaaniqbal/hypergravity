@@ -31,7 +31,7 @@ from agent.gate import FabricationBlocked, claim_success, report  # noqa: E402
 from agent.ledger import StepState, open_task  # noqa: E402
 from agent.mac_calendar import CalendarError, add_verified_event  # noqa: E402
 from agent.background import running_jobs, start as start_background  # noqa: E402
-from agent.delegate import ask_app_and_watch  # noqa: E402
+from agent.delegate import build_and_report  # noqa: E402
 from agent.mac_agent import use_app as mac_use_app  # noqa: E402
 from agent.mac_control import run as mac_run, tell_app as mac_tell_app  # noqa: E402
 from agent.web import WebError, browse, look_up  # noqa: E402
@@ -127,7 +127,7 @@ async def build_it_and_text_me(request: str, app: str = "Claude", notify: str = 
         return "No number on file to text the link to."
 
     async def work():
-        return await ask_app_and_watch(app, request)
+        return await build_and_report(request)
 
     job = start_background(f"{app}: {request[:40]}", led.task_id, dest, work)
     return f"Put it to {app} ({job.job_id}). I'll text {dest} when there's a link."
