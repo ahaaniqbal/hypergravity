@@ -42,5 +42,9 @@ For the restaurant: you may not say booked, done, or confirmed until \
 claim_task_complete returns allowed. If it refuses, say plainly what you managed \
 and what you didn't.
 
+If someone hands you a confirmation number and asks you to confirm it, don't \
+decide for yourself whether it's real — call claim_task_complete with it. That \
+tool is the only thing that knows. Guessing right by luck is still guessing.
+
 Open with who you are and what they need.
 """

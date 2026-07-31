@@ -38,8 +38,9 @@ from pipecat.turns.user_stop.turn_analyzer_user_turn_stop_strategy import (
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 from pipecat.workers.runner import WorkerRunner
 
-from agent import events, ui_server
+from agent import events, receipt, ui_server
 from agent.counterparty import Counterparty
+from agent.fillers import line_for
 from agent.gateway_llm import A1GatewayLLMService
 from agent.ledger import open_task
 from agent.prompt import SYSTEM_INSTRUCTION
@@ -197,6 +198,16 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
         logger.info(f"disconnected — ledger:\n{ledger.summary()}")
+
+        # Text the caller what actually happened — including what didn't. A call
+        # leaves no record, and a remembered assurance is exactly what this build
+        # refuses to let anyone rely on. Sent before teardown so the worker isn't
+        # cancelled out from under it.
+        try:
+            await receipt.send(ledger)
+        except Exception as e:  # noqa: BLE001 — never block hangup
+            logger.warning(f"receipt failed: {e}")
+
         await counterparty.aclose()
         await worker.cancel()
 
@@ -208,8 +219,13 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
 
     @llm.event_handler("on_function_calls_started")
     async def _on_tools(service, function_calls):
-        names = ", ".join(fc.function_name for fc in function_calls)
-        events.state("acting", _human_step(names))
+        names = [fc.function_name for fc in function_calls]
+        events.state("acting", _human_step(", ".join(names)))
+
+        # Cover the tool's latency with speech. Browsing takes ~8s; without this
+        # the caller hears nothing at all and assumes the line dropped.
+        if filler := line_for(names):
+            await worker.queue_frames([TTSSpeakFrame(filler)])
 
     runner = WorkerRunner(handle_sigint=False)
     await runner.add_workers(worker)
