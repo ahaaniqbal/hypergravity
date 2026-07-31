@@ -17,7 +17,7 @@ from pipecat.services.llm_service import FunctionCallParams
 import json
 import os
 
-from .background import start as start_background
+from .background import running_jobs, start as start_background
 from .counterparty import Counterparty, CounterpartyError
 from .gate import FabricationBlocked, claim_success, report
 from .ledger import Ledger, StepState
@@ -447,7 +447,23 @@ def build_tools(ledger: Ledger, cp: Counterparty) -> tuple[ToolsSchema, dict[str
     async def task_status(params: FunctionCallParams) -> None:
         """Lets the agent resume honestly after an interruption or a transport
         switch, instead of re-interrogating the caller."""
-        await params.result_callback({"ledger": ledger.summary(), "truthful_status": report(ledger)})
+        # Background jobs are the one thing not in the ledger's step list while
+        # they run, and "is that still going?" is the obvious question to ask a
+        # minute after starting one.
+        still_running = [
+            f"{j.what} (started {j.elapsed}s ago)" for j in running_jobs(ledger.task_id)
+        ]
+        await params.result_callback(
+            {
+                "ledger": ledger.summary(),
+                "truthful_status": report(ledger),
+                "still_running": still_running,
+                "instruction": (
+                    "Anything in still_running has NOT finished — say it's still going "
+                    "and that you'll text when it's done. Don't guess at its result."
+                ),
+            }
+        )
 
     # -- schemas --------------------------------------------------------------
 

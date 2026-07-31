@@ -60,6 +60,10 @@ MODEL = os.getenv("OPENAI_MODEL", "openai.gpt-5.6-sol")
 # starts fresh, so a completed booking is never replayed at a new caller.
 TASK_BASE = os.getenv("TASK_ID", "hypergravity-live")
 
+# How long a caller can be silent before we check they are still there. Long
+# enough to think, short enough that the line never feels dead.
+IDLE_SECONDS = float(os.getenv("IDLE_SECONDS", "9"))
+
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> None:
     """Assemble and run one session on whichever transport was handed to us."""
@@ -135,8 +139,30 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
             user_turn_strategies=[
                 TurnAnalyzerUserTurnStopStrategy(turn_analyzer=turn_analyzer),
             ],
+            # Off by default, which leaves both sides sitting in silence when a
+            # caller pauses to think. On a phone that reads as a dead line.
+            user_idle_timeout=IDLE_SECONDS,
         ),
     )
+
+    # What to say when the line goes quiet, in order. The last one admits defeat
+    # rather than pestering someone who has walked away mid-call.
+    idle_lines = [
+        "Still there?",
+        "Take your time — I'm here when you're ready.",
+        "I'll leave you to it. Call back whenever.",
+    ]
+    idle_count = 0
+
+    @user_aggregator.event_handler("on_user_turn_idle")
+    async def _on_idle(aggregator):
+        nonlocal idle_count
+        if idle_count >= len(idle_lines):
+            return
+        line = idle_lines[idle_count]
+        idle_count += 1
+        logger.info(f"caller idle ({idle_count}) — prompting")
+        await worker.queue_frames([TTSSpeakFrame(line)])
 
     pipeline = Pipeline(
         [

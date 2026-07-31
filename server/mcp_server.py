@@ -30,7 +30,7 @@ from agent.counterparty import Counterparty  # noqa: E402  (needs env first)
 from agent.gate import FabricationBlocked, claim_success, report  # noqa: E402
 from agent.ledger import StepState, open_task  # noqa: E402
 from agent.mac_calendar import CalendarError, add_verified_event  # noqa: E402
-from agent.background import start as start_background  # noqa: E402
+from agent.background import running_jobs, start as start_background  # noqa: E402
 from agent.mac_control import run as mac_run, tell_app as mac_tell_app  # noqa: E402
 from agent.web import WebError, browse, look_up  # noqa: E402
 
@@ -354,7 +354,10 @@ def hypergravity_task_status() -> str:
     interruption, instead of asking everything again.
     """
     led = _ledger()
-    return f"{led.summary()}\n\n{report(led)}"
+    running = [f"{j.what} (started {j.elapsed}s ago)" for j in running_jobs(led.task_id)]
+    tail = ("\n\nSTILL RUNNING (not finished — do not guess the result): "
+            + "; ".join(running)) if running else ""
+    return f"{led.summary()}\n\n{report(led)}{tail}"
 
 
 if __name__ == "__main__":
