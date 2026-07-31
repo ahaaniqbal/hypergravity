@@ -31,6 +31,7 @@ from agent.gate import FabricationBlocked, claim_success, report  # noqa: E402
 from agent.ledger import StepState, open_task  # noqa: E402
 from agent.mac_calendar import CalendarError, add_verified_event  # noqa: E402
 from agent.background import running_jobs, start as start_background  # noqa: E402
+from agent.delegate import ask_app_and_watch  # noqa: E402
 from agent.mac_agent import use_app as mac_use_app  # noqa: E402
 from agent.mac_control import run as mac_run, tell_app as mac_tell_app  # noqa: E402
 from agent.web import WebError, browse, look_up  # noqa: E402
@@ -102,6 +103,32 @@ async def browse_the_web(steps: list) -> str:
         return f"COULDN'T DO THAT — {e}. Don't guess what the page said."
     led.mark(label, StepState.DONE)
     return page
+
+
+@mcp.tool()
+async def build_it_and_text_me(request: str, app: str = "Claude", notify: str = "") -> str:
+    """Hand a build job to another agent on the Mac, and text the link when it's ready.
+
+    Opens a fresh conversation in Claude Desktop (which has its own tools and can
+    deploy), types the request, and watches for a URL to appear. Returns
+    immediately so the caller can hang up. The link is read off the screen — it
+    is never composed, so there is no version of this that invents one.
+
+    Args:
+        request: The full request, as you'd type it to another agent.
+        app: Which app. Defaults to Claude.
+        notify: Number to text; defaults to MY_PHONE.
+    """
+    led = _ledger()
+    dest = notify or led.caller_phone or os.getenv("MY_PHONE", "")
+    if not dest:
+        return "No number on file to text the link to."
+
+    async def work():
+        return await ask_app_and_watch(app, request)
+
+    job = start_background(f"{app}: {request[:40]}", led.task_id, dest, work)
+    return f"Put it to {app} ({job.job_id}). I'll text {dest} when there's a link."
 
 
 @mcp.tool()

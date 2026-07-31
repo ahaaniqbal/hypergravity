@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import subprocess
+import time
 
 from loguru import logger
 
@@ -52,8 +53,13 @@ async def _ensure_calendar_running() -> None:
 
 OSASCRIPT_TIMEOUT = 12.0
 
+# Which calendars to check for clashes, and how long to wait. Kept local and
+# short: the caller is on the phone, and a slow check is worse than none.
+CLASH_CALENDARS = ("Home", "Work")
+CLASH_TIMEOUT = 20.0
 
-async def _osascript(script: str) -> str:
+
+async def _osascript(script: str, timeout: float = OSASCRIPT_TIMEOUT) -> str:
     """Run AppleScript with a hard timeout.
 
     The first Calendar write raises a macOS Automation consent dialog, and
@@ -66,7 +72,7 @@ async def _osascript(script: str) -> str:
         stdout=subprocess.PIPE, stderr=subprocess.PIPE,
     )
     try:
-        out, err = await asyncio.wait_for(proc.communicate(), timeout=OSASCRIPT_TIMEOUT)
+        out, err = await asyncio.wait_for(proc.communicate(), timeout=timeout)
     except asyncio.TimeoutError:
         proc.kill()
         raise CalendarError(
@@ -131,6 +137,158 @@ async def read_event(uid: str, calendar: str = DEFAULT_CALENDAR) -> dict[str, st
         return None
     summary, start = raw.split("|", 1)
     return {"uid": uid, "summary": summary, "starts": start, "calendar": calendar}
+
+
+_busy_cache: tuple[float, list[tuple[int, int, str]]] | None = None
+BUSY_TTL_SECONDS = 300
+
+
+async def busy_cached(from_hour: int = 17, to_hour: int = 23) -> list[tuple[int, int, str]]:
+    """Today's commitments, cached.
+
+    Calendar's ``whose`` filter takes the better part of ten seconds on a real
+    machine — far too long to spend mid-call, and the answer doesn't change while
+    someone is on the phone. Read it once, reuse it, and refresh in the
+    background so the caller never waits for it.
+    """
+    global _busy_cache
+    now = time.time()
+    if _busy_cache and now - _busy_cache[0] < BUSY_TTL_SECONDS:
+        return _busy_cache[1]
+
+    events = await busy_between(from_hour, to_hour)
+    # Cache even an empty result: a calendar that timed out once will time out
+    # again, and retrying it on every call is how the pause gets reintroduced.
+    _busy_cache = (now, events)
+    return events
+
+
+def warm_busy_cache() -> None:
+    """Kick off the first read at startup, so no call ever pays for it."""
+
+    async def _warm() -> None:
+        try:
+            events = await busy_cached()
+            logger.info(f"calendar warmed: {len(events)} events tonight")
+        except Exception as e:  # noqa: BLE001
+            logger.info(f"calendar warm-up skipped: {e}")
+
+    asyncio.ensure_future(_warm())
+
+
+async def busy_between(from_hour: int = 17, to_hour: int = 23) -> list[tuple[int, int, str]]:
+    """Everything on today's calendar in a window, as (hour, minute, summary).
+
+    One query for the whole evening rather than one per slot. Four concurrent
+    osascripts contend for Calendar badly enough that every one of them times
+    out — the parallel version was slower than sequential *and* returned
+    nothing. Bucketing the results in Python costs nothing.
+    """
+    await _ensure_calendar_running()
+    names = " or ".join(f'name is "{c}"' for c in CLASH_CALENDARS)
+    script = f'''
+    tell application "Calendar"
+      set dayStart to (current date)
+      set hours of dayStart to {from_hour}
+      set minutes of dayStart to 0
+      set seconds of dayStart to 0
+      set dayEnd to (current date)
+      set hours of dayEnd to {to_hour}
+      set minutes of dayEnd to 0
+      set seconds of dayEnd to 0
+      set out to ""
+      repeat with c in (every calendar whose {names})
+        repeat with e in (every event of c whose start date is greater than dayStart ¬
+                          and start date is less than dayEnd)
+          set s to start date of e
+          set out to out & (hours of s) & ":" & (minutes of s) & "|" & (summary of e) & linefeed
+        end repeat
+      end repeat
+      return out
+    end tell
+    '''
+    try:
+        raw = await _osascript(script, timeout=CLASH_TIMEOUT)
+    except CalendarError as e:
+        logger.info(f"couldn't read the calendar: {e}")
+        return []
+
+    out: list[tuple[int, int, str]] = []
+    for line in raw.splitlines():
+        when, _, summary = line.partition("|")
+        hh, _, mm = when.partition(":")
+        if hh.strip().isdigit() and summary.strip():
+            out.append((int(hh), int(mm or 0), summary.strip()))
+    return out
+
+
+def clashes_in(
+    busy: list[tuple[int, int, str]], slots: list[str], window_minutes: int = 90
+) -> dict[str, list[str]]:
+    """Which of these slots the caller is already busy for. Pure, so it's free."""
+    found: dict[str, list[str]] = {}
+    for slot in slots:
+        try:
+            sh, sm = (int(p) for p in slot.split(":", 1))
+        except ValueError:
+            continue
+        start = sh * 60 + sm
+        overlapping = [
+            summary
+            for (h, m, summary) in busy
+            if abs((h * 60 + m) - start) < window_minutes
+            and "Dinner for" not in summary  # our own bookings aren't clashes
+        ]
+        if overlapping:
+            found[slot] = overlapping[:2]
+    return found
+
+
+async def clashes_with(time_slot: str, window_minutes: int = 90) -> list[str]:
+    """What's already in the calendar around a proposed time.
+
+    Read across every calendar, not just the one we write to: a clash on a work
+    calendar is still a clash. Returns summaries, or an empty list — a failure to
+    read is deliberately indistinguishable from "nothing found", because a
+    calendar we can't see is not grounds for refusing to book.
+    """
+    try:
+        hour, minute = (int(p) for p in time_slot.split(":", 1))
+    except ValueError:
+        return []
+
+    await _ensure_calendar_running()
+    # Only the local calendars, and only the named ones. Iterating every
+    # calendar means walking remote iCloud and Google stores, which takes long
+    # enough to blow any timeout worth having on a live call. A conflict check
+    # that adds ten seconds to a booking is worse than no conflict check.
+    names = " or ".join(f'name is "{c}"' for c in CLASH_CALENDARS)
+    script = f'''
+    tell application "Calendar"
+      set theStart to (current date)
+      set hours of theStart to {hour}
+      set minutes of theStart to {minute}
+      set seconds of theStart to 0
+      set theEnd to theStart + {window_minutes * 60}
+      set found to {{}}
+      repeat with c in (every calendar whose {names})
+        repeat with e in (every event of c whose start date is less than theEnd ¬
+                          and end date is greater than theStart)
+          set end of found to (summary of e)
+        end repeat
+      end repeat
+      return found
+    end tell
+    '''
+    try:
+        raw = await _osascript(script, timeout=CLASH_TIMEOUT)
+    except CalendarError as e:
+        logger.info(f"couldn't check for clashes: {e}")
+        return []
+
+    seen = [s.strip() for s in raw.split(",") if s.strip()]
+    # Our own bookings are not clashes with themselves.
+    return [s for s in seen if "Dinner for" not in s][:3]
 
 
 async def add_verified_event(

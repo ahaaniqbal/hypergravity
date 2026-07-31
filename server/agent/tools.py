@@ -14,15 +14,17 @@ from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.services.llm_service import FunctionCallParams
 
+import asyncio
 import json
 import os
 
 from .authz import REFUSAL, may_use
 from .background import running_jobs, start as start_background
+from .delegate import ask_app_and_watch
 from .counterparty import Counterparty, CounterpartyError
 from .gate import FabricationBlocked, claim_success, report
 from .ledger import Ledger, StepState
-from .mac_calendar import CalendarError, add_verified_event
+from .mac_calendar import CalendarError, add_verified_event, busy_cached, clashes_in
 from .mac_agent import use_app as mac_use_app
 from .mac_control import run as mac_run, tell_app as mac_tell_app
 from .web import WebError, browse, look_up
@@ -66,11 +68,29 @@ def build_tools(ledger: Ledger, cp: Counterparty) -> tuple[ToolsSchema, dict[str
         ledger.mark("check availability", StepState.DONE)
         free = [s["time"] for s in slots if s.get("available")]
         taken = [s["time"] for s in slots if not s.get("available")]
+
+        # Check the caller's own calendar at the same time. Folded in here rather
+        # than bolted onto the booking because this is the step they already
+        # expect a pause for — one "let me check" covers both, instead of adding
+        # six seconds of silence after they've chosen. Run concurrently so the
+        # cost is one lookup, not one per slot.
+        clashes: dict[str, list[str]] = {}
+        try:
+            clashes = clashes_in(await busy_cached(), free)
+        except Exception as e:  # noqa: BLE001 — a calendar we can't read never blocks a booking
+            logger.info(f"clash check skipped: {e}")
+
         await params.result_callback(
             {
                 "available": free,
                 "unavailable": taken,
-                "note": "Only offer times in 'available'. Never offer a time in 'unavailable'.",
+                "already_busy_then": clashes,
+                "note": (
+                    "Only offer times in 'available'. Never offer one in 'unavailable'. "
+                    "If a free time appears in 'already_busy_then' the caller has "
+                    "something else on — mention it in passing when you offer it, and "
+                    "lead with a time that's genuinely clear."
+                ),
             }
         )
 
@@ -371,6 +391,38 @@ def build_tools(ledger: Ledger, cp: Counterparty) -> tuple[ToolsSchema, dict[str
             }
         )
 
+    async def build_it_and_text_me(params: FunctionCallParams) -> None:
+        a = params.arguments
+        request = str(a.get("request", "")).strip()
+        app = str(a.get("app") or "Claude").strip()
+        notify = str(a.get("notify") or ledger.caller_phone or MY_PHONE).strip()
+
+        if not request:
+            await params.result_callback({"started": False, "reason": "nothing to build"})
+            return
+        if not notify:
+            await params.result_callback(
+                {"started": False, "reason": "no number to text the link to"}
+            )
+            return
+
+        async def work():
+            return await ask_app_and_watch(app, request)
+
+        job = start_background(f"{app}: {request[:40]}", ledger.task_id, notify, work)
+        await params.result_callback(
+            {
+                "started": True,
+                "job_id": job.job_id,
+                "will_text": notify,
+                "instruction": (
+                    f"Say you've put it to {app} and you'll text the link when it's "
+                    "ready, in ONE sentence, so they can hang up. Do not promise what "
+                    "the result will be — you haven't seen it yet."
+                ),
+            }
+        )
+
     # -- work that outlives the call ------------------------------------------
 
     async def work_in_background(params: FunctionCallParams) -> None:
@@ -513,6 +565,26 @@ def build_tools(ledger: Ledger, cp: Counterparty) -> tuple[ToolsSchema, dict[str
             },
             required=["steps"],
             handler=browse_the_web,
+        ),
+        FunctionSchema(
+            name="build_it_and_text_me",
+            description=(
+                "Hand a build or research job to another agent on the Mac — Claude "
+                "Desktop by default, which has its own tools and can deploy — then "
+                "text the caller the link when it appears. Use for 'make me a landing "
+                "page', 'write me a script', anything that takes minutes. Returns "
+                "immediately so they can hang up."
+            ),
+            properties={
+                "request": {
+                    "type": "string",
+                    "description": "The full request, written out as you'd type it to another agent.",
+                },
+                "app": {"type": "string", "description": "Which app. Defaults to Claude."},
+                "notify": {"type": "string", "description": "Number to text; defaults to the caller."},
+            },
+            required=["request"],
+            handler=build_it_and_text_me,
         ),
         FunctionSchema(
             name="work_in_background",

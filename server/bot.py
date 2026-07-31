@@ -43,6 +43,7 @@ from agent.counterparty import Counterparty
 from agent.fillers import line_for
 from agent.gateway_llm import A1GatewayLLMService
 from agent.ledger import open_task
+from agent.mac_calendar import warm_busy_cache
 from agent.prompt import SYSTEM_INSTRUCTION
 from agent.tools import build_tools
 
@@ -83,6 +84,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
 
     # Pill + judges' panel, served alongside the call from this same loop.
     ui_server.start()
+
+    # Read the calendar now, in the background, so the first caller doesn't wait
+    # ten seconds for it mid-conversation.
+    warm_busy_cache()
 
     # Cartesia for both legs: Deepgram signup was down on the day, and Cartesia's
     # Live STT runs on the key we already had. One vendor, one failure domain.
