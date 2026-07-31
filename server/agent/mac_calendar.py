@@ -42,8 +42,11 @@ async def _ensure_calendar_running() -> None:
     global _ensured
     if _ensured:
         return
+    # -g and -j: launch in the background, hidden. Without them the app is
+    # brought to the front, so simply answering the phone yanked Calendar over
+    # whatever the user was looking at — for a check they never asked for.
     proc = await asyncio.create_subprocess_exec(
-        "open", "-a", "Calendar",
+        "open", "-g", "-j", "-a", "Calendar",
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
     )
     await proc.wait()

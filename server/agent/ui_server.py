@@ -57,9 +57,27 @@ async def serve() -> None:
     try:
         logger.info(f"UI at http://localhost:{PORT}/  (pill: /?pill)")
         await server.serve()
-    except Exception as e:
+    except SystemExit as e:
+        # uvicorn calls sys.exit(3) when it can't bind. Left uncaught that
+        # propagates out of the task and takes the whole bot down with it —
+        # the caller hears a greeting and then a dead line. A dashboard that
+        # won't start is a cosmetic problem; it must never end a phone call.
+        logger.warning(f"UI server couldn't start (exit {e.code}) — carrying on without it")
+    except Exception as e:  # noqa: BLE001
         logger.warning(f"UI server stopped: {e}")
 
 
-def start() -> asyncio.Task:
-    return asyncio.create_task(serve())
+_task: asyncio.Task | None = None
+
+
+def start() -> asyncio.Task | None:
+    """Start once per process, not once per call.
+
+    ``run_bot`` runs for every incoming call, so calling this from there bound
+    the port on the first call and then failed on every one after it.
+    """
+    global _task
+    if _task and not _task.done():
+        return _task
+    _task = asyncio.create_task(serve())
+    return _task

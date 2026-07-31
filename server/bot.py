@@ -84,11 +84,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
 
     counterparty = Counterparty()
 
-    # Pill + judges' panel, served alongside the call from this same loop.
+    # Both of these are process-wide, not per-call. run_bot runs for every
+    # incoming call, and starting them here meant the second caller tried to
+    # rebind a held port and killed the process.
     ui_server.start()
-
-    # Read the calendar now, in the background, so the first caller doesn't wait
-    # ten seconds for it mid-conversation.
     warm_busy_cache()
 
     # Cartesia for both legs: Deepgram signup was down on the day, and Cartesia's
