@@ -119,12 +119,16 @@ def flatten_input(items: list[Any]) -> list[dict[str, str]]:
 class A1GatewayLLMService(OpenAIResponsesHttpLLMService):
     """Non-streaming Responses client aimed at the event's AI gateway."""
 
-    def __init__(self, *, api_key: str, base_url: str, **kwargs):
+    def __init__(self, *, api_key: str, base_url: str, state=None, **kwargs):
         super().__init__(api_key=api_key, base_url=base_url, **kwargs)
         self._gw_base = base_url.rstrip("/")
         self._gw_key = api_key
         self._http = httpx.AsyncClient(timeout=45.0)
         self._consecutive_failures = 0
+        # A callable returning a short summary of what has actually happened on
+        # this task. Re-attached to every request and never trimmed, so the
+        # agent cannot forget what it just did when the history is dropped.
+        self._state = state
 
     async def _apologise(self) -> None:
         """Say something different each time.
@@ -231,11 +235,32 @@ class A1GatewayLLMService(OpenAIResponsesHttpLLMService):
         if instructions:
             messages = [{"role": "system", "content": instructions}, *messages]
 
-        params["input"] = self._fit_budget(messages, params)
+        # Pin the task state to the end. When a long call blows the budget the
+        # oldest turns go — which is the entire conversation — and the agent
+        # then greets the caller again and says they haven't asked for anything.
+        # The ledger knows what was done; this makes sure the model sees it no
+        # matter how much history had to be dropped. Reserved *before* trimming,
+        # or appending it just puts the request back over the limit.
+        state_msg: dict[str, str] | None = None
+        if self._state:
+            try:
+                if summary := self._state():
+                    state_msg = {"role": "system", "content": summary}
+            except Exception as e:  # noqa: BLE001 — never break a turn over this
+                logger.debug(f"state summary unavailable: {e}")
+
+        reserve = len(json.dumps(state_msg).encode()) + 8 if state_msg else 0
+        messages = self._fit_budget(messages, params, reserve=reserve)
+        if state_msg:
+            messages.append(state_msg)
+
+        params["input"] = messages
         return params
 
     @staticmethod
-    def _fit_budget(messages: list[dict[str, str]], params: dict[str, Any]) -> list[dict[str, str]]:
+    def _fit_budget(
+        messages: list[dict[str, str]], params: dict[str, Any], reserve: int = 0
+    ) -> list[dict[str, str]]:
         """Drop the oldest turns until the whole request fits.
 
         The gateway rejects anything over roughly 14 KB — small enough that the
@@ -249,7 +274,7 @@ class A1GatewayLLMService(OpenAIResponsesHttpLLMService):
         never dropped.
         """
         overhead = len(json.dumps({k: v for k, v in params.items() if k != "input"}).encode())
-        room = BODY_LIMIT - overhead
+        room = BODY_LIMIT - overhead - reserve
 
         def size(msgs: list[dict[str, str]]) -> int:
             return len(json.dumps(msgs).encode())

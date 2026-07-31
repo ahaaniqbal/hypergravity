@@ -46,7 +46,7 @@ from agent import events, receipt, ui_server
 from agent.counterparty import Counterparty
 from agent.fillers import line_for
 from agent.gateway_llm import A1GatewayLLMService
-from agent.ledger import open_task
+from agent.ledger import StepState, open_task
 from agent.memory import greeting_for, start_call
 from agent.prompt import SYSTEM_INSTRUCTION
 from agent.tools import build_tools
@@ -115,9 +115,28 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
 
     tools_schema, handlers = build_tools(ledger, counterparty)
 
+    def _task_state() -> str:
+        """What has actually happened, in a form that survives trimming."""
+        done = [s.name for s in ledger.steps if s.state is StepState.DONE]
+        failed = [s.name for s in ledger.steps if s.state is StepState.FAILED]
+        if not done and not failed:
+            return ""
+        bits = []
+        if done:
+            bits.append("already done: " + ", ".join(done[-5:]))
+        if failed:
+            bits.append("failed: " + ", ".join(failed[-3:]))
+        if ledger.verified:
+            bits.append("verified: " + ", ".join(ledger.verified))
+        return (
+            "SO FAR THIS CALL — " + "; ".join(bits) +
+            ". Don't greet them again or ask what they need; carry on from here."
+        )
+
     llm = A1GatewayLLMService(
         api_key=os.getenv("OPENAI_API_KEY"),
         base_url=GATEWAY_BASE_URL,
+        state=_task_state,
         settings=A1GatewayLLMService.Settings(
             model=MODEL,
             system_instruction=SYSTEM_INSTRUCTION,
