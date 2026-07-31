@@ -26,7 +26,7 @@ from .memory import learn_booking, learn_note
 from .counterparty import Counterparty, CounterpartyError
 from .gate import FabricationBlocked, claim_success, report
 from .ledger import Ledger, StepState
-from .mac_calendar import CalendarError, add_verified_event, busy_cached, clashes_in
+from .mac_calendar import CalendarError, add_verified_event, busy_if_known, clashes_in
 from .mac_agent import use_app as mac_use_app
 from .mac_control import run as mac_run, tell_app as mac_tell_app
 from .web import WebError, browse, look_up, peek
@@ -78,7 +78,7 @@ def build_tools(ledger: Ledger, cp: Counterparty) -> tuple[ToolsSchema, dict[str
         # cost is one lookup, not one per slot.
         clashes: dict[str, list[str]] = {}
         try:
-            clashes = clashes_in(await busy_cached(), free)
+            clashes = clashes_in(await busy_if_known(), free)
         except Exception as e:  # noqa: BLE001 — a calendar we can't read never blocks a booking
             logger.info(f"clash check skipped: {e}")
 

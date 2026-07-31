@@ -47,7 +47,6 @@ from agent.counterparty import Counterparty
 from agent.fillers import line_for
 from agent.gateway_llm import A1GatewayLLMService
 from agent.ledger import open_task
-from agent.mac_calendar import warm_busy_cache
 from agent.memory import start_call
 from agent.prompt import SYSTEM_INSTRUCTION
 from agent.tools import build_tools
@@ -88,11 +87,15 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
 
     counterparty = Counterparty()
 
-    # Both of these are process-wide, not per-call. run_bot runs for every
-    # incoming call, and starting them here meant the second caller tried to
-    # rebind a held port and killed the process.
+    # Process-wide, not per-call: run_bot runs for every incoming call, and
+    # starting this here meant the second caller tried to rebind a held port and
+    # killed the process.
     ui_server.start()
-    warm_busy_cache()
+
+    # No calendar warm-up. Reading it at call start launched Calendar and raised
+    # an Automation prompt on *every* call, for a clash check the caller might
+    # never need — and a denied prompt derailed the conversation. Nothing should
+    # touch the calendar until someone asks for something calendar-related.
 
     # Cartesia for both legs: Deepgram signup was down on the day, and Cartesia's
     # Live STT runs on the key we already had. One vendor, one failure domain.

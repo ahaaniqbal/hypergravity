@@ -83,7 +83,15 @@ async def _osascript(script: str, timeout: float = OSASCRIPT_TIMEOUT) -> str:
             "Approve it once and this will work from then on."
         ) from None
     if proc.returncode != 0:
-        detail = (err or b"").decode().strip().splitlines()
+        text = (err or b"").decode().strip()
+        # A refused Automation prompt is a specific, fixable thing — say so
+        # rather than reading an AppleScript error number down the phone.
+        if "-1743" in text or "Not authorised" in text or "not allowed" in text.lower():
+            raise CalendarError(
+                "I don't have permission to use Calendar on this Mac — it needs "
+                "allowing once in System Settings under Privacy, Automation."
+            )
+        detail = text.splitlines()
         raise CalendarError(detail[-1][:200] if detail else "osascript failed")
     return out.decode().strip()
 
@@ -146,14 +154,40 @@ _busy_cache: tuple[float, list[tuple[int, int, str]]] | None = None
 BUSY_TTL_SECONDS = 300
 
 
-async def busy_cached(from_hour: int = 17, to_hour: int = 23) -> list[tuple[int, int, str]]:
-    """Today's commitments, cached.
+async def busy_if_known(from_hour: int = 17, to_hour: int = 23) -> list[tuple[int, int, str]]:
+    """Today's commitments, but only if we already have them.
 
-    Calendar's ``whose`` filter takes the better part of ten seconds on a real
-    machine — far too long to spend mid-call, and the answer doesn't change while
-    someone is on the phone. Read it once, reuse it, and refresh in the
-    background so the caller never waits for it.
+    Never reads the calendar on the caller's time, and never launches the app.
+    Clash detection is a nicety; it is not worth ten seconds of silence, an
+    Automation prompt, or Calendar leaping to the front of someone's screen.
+
+    A cold cache returns nothing and quietly warms itself for next time, so the
+    second booking of a session gets the benefit and the first costs nothing.
     """
+    global _busy_cache
+    now = time.time()
+    if _busy_cache and now - _busy_cache[0] < BUSY_TTL_SECONDS:
+        return _busy_cache[1]
+
+    # Only warm if Calendar is already open. Launching it to populate a cache
+    # nobody asked for is how the app kept appearing mid-call, and how an
+    # Automation prompt ended up in front of someone who had just wanted a
+    # table booked.
+    if await _calendar_is_running():
+        warm_busy_cache()
+    return []
+
+
+async def _calendar_is_running() -> bool:
+    proc = await asyncio.create_subprocess_exec(
+        "pgrep", "-x", "Calendar",
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    return await proc.wait() == 0
+
+
+async def busy_cached(from_hour: int = 17, to_hour: int = 23) -> list[tuple[int, int, str]]:
+    """Read the calendar, using the cache if it's fresh. Blocks; may prompt."""
     global _busy_cache
     now = time.time()
     if _busy_cache and now - _busy_cache[0] < BUSY_TTL_SECONDS:
