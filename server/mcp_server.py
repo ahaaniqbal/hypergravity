@@ -30,6 +30,7 @@ from agent.counterparty import Counterparty  # noqa: E402  (needs env first)
 from agent.gate import FabricationBlocked, claim_success, report  # noqa: E402
 from agent.ledger import StepState, open_task  # noqa: E402
 from agent.mac_calendar import CalendarError, add_verified_event  # noqa: E402
+from agent.background import start as start_background  # noqa: E402
 from agent.mac_control import run as mac_run, tell_app as mac_tell_app  # noqa: E402
 from agent.web import WebError, look_up  # noqa: E402
 
@@ -51,8 +52,10 @@ async def _with_counterparty(fn):
         await cp.aclose()
 
 
-@mcp.tool()
-async def look_up_on_the_web(query: str) -> str:
+# Deliberately NOT exposed to VoiceOS: it has its own web search and routes
+# to that instead, so advertising ours only adds ambiguity. The phone door
+# still has it, where nothing else can browse.
+async def _unused_look_up_on_the_web(query: str) -> str:
     """Look anything up on the web in the browser on this Mac, and read the page back.
 
     Flights, prices, opening hours, a menu, a dashboard. Use whenever asked
@@ -74,6 +77,41 @@ async def look_up_on_the_web(query: str) -> str:
         return f"COULD NOT READ THE PAGE — {e}. Do not guess what it said."
     led.mark(f"look up: {query[:38]}", StepState.DONE)
     return page
+
+
+@mcp.tool()
+async def work_in_background(what: str, command: str = "", web_query: str = "", notify: str = "") -> str:
+    """Start something slow and TEXT the result when it's done, so nobody waits.
+
+    Use the moment a task looks slower than a person will sit through — searching
+    lots of files, a long build, watching a page. Returns immediately; the work
+    carries on afterwards and the result arrives as a text.
+
+    Args:
+        what: Short description in the user's own words.
+        command: Shell command, if it's a machine task.
+        web_query: Search or URL, if it's a web task.
+        notify: Number to text; defaults to MY_PHONE.
+    """
+    led = _ledger()
+    dest = notify or led.caller_phone or os.getenv("MY_PHONE", "")
+    if not dest:
+        return "No number on file to text the result to."
+    if not (command or web_query):
+        return "Need either a command or a web query."
+
+    async def work():
+        if command:
+            r = await mac_run(command)
+            if r.get("refused"):
+                raise RuntimeError(str(r.get("reason")))
+            if not r.get("succeeded"):
+                raise RuntimeError(str(r.get("output") or r.get("reason")))
+            return r.get("output")
+        return await look_up(web_query)
+
+    job = start_background(what, led.task_id, dest, work)
+    return f"Started ({job.job_id}). I'll text {dest} when it's done — no need to wait."
 
 
 @mcp.tool()
@@ -124,7 +162,7 @@ async def control_app(app: str, applescript: str) -> str:
 
 
 @mcp.tool()
-async def check_availability() -> str:
+async def check_restaurant_availability() -> str:
     """List which reservation times the restaurant actually has free tonight.
 
     Call this before offering the caller any time, and again after any refusal.
@@ -144,7 +182,7 @@ async def check_availability() -> str:
 
 
 @mcp.tool()
-async def book_table(name: str, party_size: int, time_slot: str, notes: str = "") -> str:
+async def book_restaurant_table(name: str, party_size: int, time_slot: str, notes: str = "") -> str:
     """Attempt a reservation, then independently verify it landed.
 
     This can fail — the slot may be taken. Believe only what this returns, not
@@ -199,7 +237,7 @@ async def book_table(name: str, party_size: int, time_slot: str, notes: str = ""
 
 
 @mcp.tool()
-async def send_sms_confirmation(body: str, to: str = "") -> str:
+async def text_me_an_sms(body: str, to: str = "") -> str:
     """Text the confirmation. Only after a verified booking.
 
     Args:
@@ -229,7 +267,7 @@ async def send_sms_confirmation(body: str, to: str = "") -> str:
 
 
 @mcp.tool()
-async def add_to_calendar(time_slot: str = "", title: str = "", notes: str = "") -> str:
+async def add_to_mac_calendar(time_slot: str = "", title: str = "", notes: str = "") -> str:
     """Put the confirmed booking in this Mac's own Calendar, then re-read it.
 
     Only after a verified booking. A judge can check this one with no
@@ -263,7 +301,7 @@ async def add_to_calendar(time_slot: str = "", title: str = "", notes: str = "")
 
 
 @mcp.tool()
-def claim_task_complete(booking_id: str) -> str:
+def verify_before_confirming(booking_id: str) -> str:
     """The only way to report the task done. Call it ONCE per task.
 
     Requires the booking id the restaurant issued and that was independently
@@ -285,7 +323,7 @@ def claim_task_complete(booking_id: str) -> str:
 
 
 @mcp.tool()
-def task_status() -> str:
+def hypergravity_task_status() -> str:
     """What is done, pending and verified on the current task.
 
     Use this to pick up a task that was started on the phone, or after an

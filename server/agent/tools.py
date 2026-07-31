@@ -14,12 +14,18 @@ from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.services.llm_service import FunctionCallParams
 
+import os
+
+from .background import start as start_background
 from .counterparty import Counterparty, CounterpartyError
 from .gate import FabricationBlocked, claim_success, report
 from .ledger import Ledger, StepState
 from .mac_calendar import CalendarError, add_verified_event
 from .mac_control import run as mac_run, tell_app as mac_tell_app
 from .web import WebError, look_up
+
+
+MY_PHONE = os.getenv("MY_PHONE", "")
 
 
 def build_tools(ledger: Ledger, cp: Counterparty) -> tuple[ToolsSchema, dict[str, Any]]:
@@ -267,6 +273,50 @@ def build_tools(ledger: Ledger, cp: Counterparty) -> tuple[ToolsSchema, dict[str
             }
         )
 
+    # -- work that outlives the call ------------------------------------------
+
+    async def work_in_background(params: FunctionCallParams) -> None:
+        a = params.arguments
+        what = str(a.get("what", "")).strip()
+        command = str(a.get("command", "")).strip()
+        query = str(a.get("web_query", "")).strip()
+        notify = str(a.get("notify") or ledger.caller_phone or MY_PHONE).strip()
+
+        if not what or not (command or query):
+            await params.result_callback(
+                {"started": False, "reason": "need a description and either a command or a web query"}
+            )
+            return
+        if not notify:
+            await params.result_callback(
+                {"started": False, "reason": "no number to text the result to — ask for one"}
+            )
+            return
+
+        async def work():
+            if command:
+                result = await mac_run(command)
+                if result.get("refused"):
+                    raise RuntimeError(str(result.get("reason")))
+                if not result.get("succeeded"):
+                    raise RuntimeError(str(result.get("output") or result.get("reason")))
+                return result.get("output")
+            return await look_up(query)
+
+        job = start_background(what, ledger.task_id, notify, work)
+        await params.result_callback(
+            {
+                "started": True,
+                "job_id": job.job_id,
+                "will_text": notify,
+                "instruction": (
+                    "Tell the caller you're on it and that you'll text them when it's "
+                    "done, so they can hang up. Say it in one sentence. Do NOT wait for "
+                    "the result and do NOT describe what it will say."
+                ),
+            }
+        )
+
     # -- the caller's own machine --------------------------------------------
 
     async def add_to_calendar(params: FunctionCallParams) -> None:
@@ -355,6 +405,26 @@ def build_tools(ledger: Ledger, cp: Counterparty) -> tuple[ToolsSchema, dict[str
             },
             required=["query"],
             handler=look_up_on_the_web,
+        ),
+        FunctionSchema(
+            name="work_in_background",
+            description=(
+                "Start something that takes a while and TEXT the caller when it's done, "
+                "so they can hang up. Use this the moment a task looks slower than a "
+                "person will hold the phone for — searching lots of files, a long build, "
+                "anything you'd otherwise make them wait through. Returns immediately."
+            ),
+            properties={
+                "what": {
+                    "type": "string",
+                    "description": "Short description in the caller's words, e.g. 'the big files in Downloads'.",
+                },
+                "command": {"type": "string", "description": "Shell command to run, if it's a machine task."},
+                "web_query": {"type": "string", "description": "Search or URL, if it's a web task."},
+                "notify": {"type": "string", "description": "Number to text; defaults to the caller."},
+            },
+            required=["what"],
+            handler=work_in_background,
         ),
         FunctionSchema(
             name="run_on_mac",
