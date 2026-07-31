@@ -20,7 +20,14 @@ from pathlib import Path
 
 from loguru import logger
 
+import os
+
 STORE = Path(__file__).resolve().parent.parent / ".memory.json"
+
+# Who owns this Mac. Known from the first call, so the agent doesn't have to
+# learn its owner's name by watching them book a table.
+OWNER_NAME = os.getenv("OWNER_NAME", "")
+OWNER_PHONE = os.getenv("MY_PHONE", "")
 MAX_BOOKINGS = 5
 MAX_NOTES = 8
 
@@ -151,6 +158,33 @@ def learn_note(phone: str, note: str) -> None:
     if note and note not in p.notes:
         p.notes.append(note)
     remember(p)
+
+
+DEFAULT_GREETING = "Hey, it's HyperGravity. What do you need?"
+
+
+def greeting_for(phone: str) -> str:
+    """The opening line, given who is calling.
+
+    Spoken straight to TTS rather than generated, so it costs nothing and never
+    varies in latency. Personal for someone we know, neutral for anyone else —
+    a stranger being greeted by name is unsettling rather than warm, and a judge
+    dialling in should hear the product introduce itself.
+    """
+    profile = recall(phone)
+    name = profile.name or (OWNER_NAME if _key(phone) == _key(OWNER_PHONE) else "")
+    if not name:
+        return DEFAULT_GREETING
+
+    # Vary it a little. The same words every time is how a returning caller
+    # notices they're talking to a recording.
+    first = name.split()[0]
+    openers = [
+        f"Hey {first}, what do you need?",
+        f"{first} — what can I do?",
+        f"Hi {first}, what's up?",
+    ]
+    return openers[profile.calls % len(openers)]
 
 
 def forget(phone: str) -> bool:

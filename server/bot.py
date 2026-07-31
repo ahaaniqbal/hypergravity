@@ -47,7 +47,7 @@ from agent.counterparty import Counterparty
 from agent.fillers import line_for
 from agent.gateway_llm import A1GatewayLLMService
 from agent.ledger import open_task
-from agent.memory import start_call
+from agent.memory import greeting_for, start_call
 from agent.prompt import SYSTEM_INSTRUCTION
 from agent.tools import build_tools
 
@@ -231,15 +231,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
             # "Hi, it's HyperGravity" cost 2.4s of dead air on every answered
             # call — the caller's first impression was silence. The line is the
             # same every time, so there is nothing to generate.
-            await worker.queue_frames(
-                [TTSSpeakFrame("Hey, it's HyperGravity. What do you need?")]
-            )
-            context.add_message(
-                {
-                    "role": "assistant",
-                    "content": "Hey, it's HyperGravity. What do you need?",
-                }
-            )
+            opener = greeting_for(caller or "")
+            await worker.queue_frames([TTSSpeakFrame(opener)])
+            context.add_message({"role": "assistant", "content": opener})
             # What we know about this caller from previous calls. Offered, not
             # assumed: a returning caller shouldn't be re-interrogated, but
             # people do change their minds.
