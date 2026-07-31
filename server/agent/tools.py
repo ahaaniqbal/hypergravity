@@ -144,6 +144,24 @@ def build_tools(ledger: Ledger, cp: Counterparty) -> tuple[ToolsSchema, dict[str
                 }
             )
             return
+        # The MCP reports some refusals as prose in a 200 rather than as an
+        # error — e.g. "destination not allowed". Treat any such body as a
+        # failure, or the ledger records evidence for a text that never went.
+        prose = str(resp.get("_text", ""))
+        if "error" in prose.lower() or "not allowed" in prose.lower():
+            ledger.mark("send SMS", StepState.FAILED, prose)
+            await params.result_callback(
+                {
+                    "sent": False,
+                    "reason": prose,
+                    "instruction": (
+                        "The text did NOT go out. Say so plainly. Keep it separate from "
+                        "the booking, which may still be fine."
+                    ),
+                }
+            )
+            return
+
         ledger.record_evidence("sms", to, {"to": to, "body": body, "response": resp})
         ledger.mark("send SMS", StepState.DONE, f"to {to}")
         await params.result_callback({"sent": True, "to": to, "response": resp})

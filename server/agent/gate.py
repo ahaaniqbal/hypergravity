@@ -17,11 +17,15 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Literal
 
+import os
+
 from loguru import logger
 
+from . import events
 from .ledger import Ledger
 
 LOG_PATH = Path(__file__).resolve().parent.parent / "verification_log.jsonl"
+REST_BASE = os.getenv("A1_BASE", "https://hack.a1mobile.com")
 
 Verdict = Literal["ALLOWED", "BLOCKED"]
 
@@ -51,11 +55,23 @@ def decisions() -> list[GateDecision]:
 def _record(d: GateDecision) -> None:
     _DECISIONS.append(d)
     logger.bind(gate=True).info(d.line())
+    events.gate(d.verdict, d.reason, d.token)
+    if d.verdict == "ALLOWED" and d.evidence:
+        events.evidence(d.kind, d.token, _how_to_check(d.kind, d.token))
     try:
         with LOG_PATH.open("a") as f:
             f.write(json.dumps(asdict(d)) + "\n")
     except OSError:  # never let logging break a live call
         pass
+
+
+def _how_to_check(kind: str, token: str) -> str:
+    """Told to the judge, so they can confirm without taking our word."""
+    if kind == "booking":
+        return f"curl -H 'X-Team-Key: <key>' {REST_BASE}/api/bookings  → look for id {token}"
+    if kind == "sms":
+        return f"check the handset at {token} for the confirmation text"
+    return token
 
 
 class FabricationBlocked(Exception):

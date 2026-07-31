@@ -33,6 +33,7 @@ from pipecat.transports.base_transport import BaseTransport
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 from pipecat.workers.runner import WorkerRunner
 
+from agent import events, ui_server
 from agent.counterparty import Counterparty
 from agent.gateway_llm import A1GatewayLLMService
 from agent.ledger import get_ledger
@@ -151,9 +152,34 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
         await counterparty.aclose()
         await worker.cancel()
 
+    # Surface what the agent is hearing, thinking and saying, for the pill and
+    # the judges' panel. Transcription frames are the cheapest honest signal.
+    @transport.event_handler("on_client_connected")
+    async def _ui_ready(transport, client):
+        events.state("listening")
+
+    @llm.event_handler("on_function_calls_started")
+    async def _on_tools(service, function_calls):
+        names = ", ".join(fc.function_name for fc in function_calls)
+        events.state("acting", _human_step(names))
+
     runner = WorkerRunner(handle_sigint=False)
     await runner.add_workers(worker)
     await runner.run()
+
+
+# Tool names are for logs; the pill says what a person would say.
+_HUMAN = {
+    "check_availability": "checking what's free…",
+    "book_table": "booking the table…",
+    "send_sms_confirmation": "texting the confirmation…",
+    "claim_task_complete": "verifying before I say it's done…",
+    "task_status": "picking up where we left off…",
+}
+
+
+def _human_step(names: str) -> str:
+    return " ".join(_HUMAN.get(n.strip(), n.strip()) for n in names.split(","))
 
 
 async def bot(runner_args: RunnerArguments):

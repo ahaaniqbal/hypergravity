@@ -1,0 +1,228 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>HyperGravity</title>
+<style>
+  /* Visual language borrowed from VoiceOS (dark glass HUD, quoted command,
+     vivid blue "the agent is touching this" glow) and the floating-cluster
+     idiom common to Grok / Mistral / Copilot voice modes: one dot, one line,
+     almost nothing else. */
+  :root{
+    --bg:#08090c; --panel:#111318; --line:#1e2129; --dim:#82879a; --fg:#f2f3f7;
+    --ok:#31d68a; --bad:#ff4d4d; --warn:#ffb020; --blue:#1a6dff;
+    font-family:"SF Pro Display",ui-sans-serif,-apple-system,system-ui,sans-serif;
+    font-synthesis-weight:none;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{background:var(--bg);color:var(--fg);overflow:hidden;
+       -webkit-font-smoothing:antialiased}
+
+  /* ============ PILL — small always-on-top window (?pill) ============ */
+  .pill{display:none}
+  body.pill-mode{background:transparent}
+  body.pill-mode .panel{display:none}
+  body.pill-mode .pill{display:flex}
+
+  .pill{
+    flex-direction:column;justify-content:center;gap:14px;height:100vh;
+    padding:20px 24px;border-radius:22px;
+    background:rgba(14,15,19,.82);
+    -webkit-backdrop-filter:blur(30px) saturate(160%);
+    backdrop-filter:blur(30px) saturate(160%);
+    border:1px solid rgba(255,255,255,.09);
+    box-shadow:0 20px 60px rgba(0,0,0,.5);
+    transition:box-shadow .35s, border-color .35s;
+  }
+  /* The agent is touching something right now. */
+  body.acting .pill{
+    border-color:rgba(26,109,255,.55);
+    box-shadow:0 0 0 1px rgba(26,109,255,.35), 0 0 44px rgba(26,109,255,.4),
+               0 20px 60px rgba(0,0,0,.5);
+  }
+  body.blocked .pill{
+    border-color:rgba(255,77,77,.55);
+    box-shadow:0 0 0 1px rgba(255,77,77,.3), 0 0 40px rgba(255,77,77,.32),
+               0 20px 60px rgba(0,0,0,.5);
+  }
+
+  .row{display:flex;align-items:center;gap:10px}
+  .orb{width:9px;height:9px;border-radius:50%;background:var(--dim);flex:none;transition:.3s}
+  .orb.listening{background:var(--blue);animation:breathe 1.4s ease-in-out infinite}
+  .orb.thinking,.orb.acting{background:var(--warn);animation:breathe .9s ease-in-out infinite}
+  .orb.speaking{background:var(--ok);animation:breathe 1.1s ease-in-out infinite}
+  .orb.blocked{background:var(--bad)}
+  @keyframes breathe{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.4;transform:scale(.75)}}
+
+  .status{font-size:11px;font-weight:600;letter-spacing:.11em;text-transform:uppercase;
+          color:var(--dim)}
+
+  /* The spoken line, quoted — VoiceOS's caption treatment. */
+  .said{font-size:19px;line-height:1.35;letter-spacing:-.017em;font-weight:500;
+        min-height:26px}
+  .said.user{color:var(--dim)}
+  .said.user::before{content:'“'}
+  .said.user::after{content:'”'}
+  .said.alert{color:var(--bad)}
+
+  .strip{display:flex;flex-wrap:wrap;gap:5px}
+  .chip{font-size:10.5px;font-weight:500;padding:3px 9px;border-radius:999px;
+        border:1px solid var(--line);color:var(--dim);white-space:nowrap}
+  .chip.done{color:var(--ok);border-color:rgba(49,214,138,.35)}
+  .chip.failed{color:var(--bad);border-color:rgba(255,77,77,.35)}
+
+  /* ============ PANEL — second screen for judges ============ */
+  .panel{display:grid;grid-template-rows:auto 1fr;height:100vh}
+
+  header{display:flex;align-items:baseline;gap:14px;padding:20px 28px 18px;
+         border-bottom:1px solid var(--line)}
+  header h1{font-size:20px;margin:0;font-weight:700;letter-spacing:-.032em}
+  header .num{font-size:14px;font-weight:600;color:var(--blue);letter-spacing:-.01em}
+  header .live{margin-left:auto;display:flex;align-items:center;gap:8px;
+               font-size:11px;font-weight:600;letter-spacing:.11em;
+               text-transform:uppercase;color:var(--dim)}
+
+  .cols{display:grid;grid-template-columns:1.1fr 1fr;overflow:hidden}
+  .cols > div{overflow-y:auto;padding:22px 28px}
+  .cols > div + div{border-left:1px solid var(--line)}
+
+  h2{font-size:10.5px;text-transform:uppercase;letter-spacing:.12em;color:var(--dim);
+     margin:0 0 14px;font-weight:700}
+  h2 + h2{margin-top:30px}
+
+  .turn{margin-bottom:15px;font-size:15px;line-height:1.5;letter-spacing:-.011em}
+  .turn .who{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;
+             color:var(--dim);display:block;margin-bottom:4px}
+  .turn.agent .who{color:var(--ok)}
+  .turn.user{color:var(--dim)}
+
+  .card{border:1px solid var(--line);border-radius:11px;padding:12px 15px;
+        margin-bottom:10px;background:var(--panel)}
+  .card.ALLOWED{border-left:3px solid var(--ok)}
+  .card.BLOCKED{border-left:3px solid var(--bad);
+                background:linear-gradient(90deg,rgba(255,77,77,.07),transparent 60%)}
+  .v{font-size:10.5px;font-weight:800;letter-spacing:.1em}
+  .card.ALLOWED .v{color:var(--ok)}
+  .card.BLOCKED .v{color:var(--bad)}
+  .r{font-size:13.5px;line-height:1.5;margin-top:5px;letter-spacing:-.008em}
+
+  .k{font-size:13px;font-weight:600;color:var(--ok);letter-spacing:-.008em}
+  .c{font-size:11.5px;color:var(--dim);margin-top:6px;line-height:1.55;
+     font-family:ui-monospace,SFMono-Regular,Menlo,monospace;word-break:break-all}
+
+  .empty{color:var(--dim);font-size:13.5px;font-style:italic;margin:0}
+</style>
+
+<div class="pill">
+  <div class="row"><span class="orb" id="p-orb"></span><span class="status" id="p-state">idle</span></div>
+  <div class="said" id="p-line">Call +1 567 430 0077</div>
+  <div class="strip" id="p-strip"></div>
+</div>
+
+<div class="panel">
+  <header>
+    <h1>HyperGravity</h1>
+    <span class="num">+1 567 430 0077</span>
+    <span class="live"><span class="orb" id="h-orb"></span><span id="h-state">idle</span></span>
+  </header>
+  <div class="cols">
+    <div>
+      <h2>Live call</h2>
+      <div id="transcript"><p class="empty">Waiting for a call…</p></div>
+    </div>
+    <div>
+      <h2>Verification gate</h2>
+      <div id="gate"><p class="empty">No success claims yet.</p></div>
+      <h2>Check these yourself</h2>
+      <div id="evidence"><p class="empty">Nothing verified yet.</p></div>
+    </div>
+  </div>
+</div>
+
+<script>
+if (location.search.includes('pill')) document.body.classList.add('pill-mode');
+
+const $ = id => document.getElementById(id);
+const steps = new Map();
+let partialTurn = null;
+
+function setState(name, detail){
+  $('p-orb').className = $('h-orb').className = 'orb ' + name;
+  $('p-state').textContent = $('h-state').textContent = name;
+  document.body.classList.toggle('acting', name === 'acting' || name === 'thinking');
+  document.body.classList.toggle('blocked', name === 'blocked');
+  if (detail) setLine(detail, name === 'blocked' ? 'alert' : '');
+}
+
+function setLine(text, cls){
+  const el = $('p-line');
+  el.className = 'said ' + (cls || '');
+  el.textContent = text;
+}
+
+function renderStrip(){
+  $('p-strip').innerHTML = [...steps.entries()].map(([n, s]) =>
+    `<span class="chip ${s}">${s === 'done' ? '✓' : s === 'failed' ? '✗' : '·'} ${n}</span>`
+  ).join('');
+}
+
+function addTurn(who, text){
+  const box = $('transcript');
+  if (box.querySelector('.empty')) box.innerHTML = '';
+  const d = document.createElement('div');
+  d.className = 'turn ' + who;
+  d.innerHTML = `<span class="who">${who === 'agent' ? 'agent' : 'caller'}</span>`;
+  d.appendChild(document.createTextNode(text));
+  box.appendChild(d);
+  box.scrollTop = box.scrollHeight;
+  return d;
+}
+
+function card(into, cls, title, body){
+  const box = $(into);
+  if (box.querySelector('.empty')) box.innerHTML = '';
+  const d = document.createElement('div');
+  d.className = 'card ' + cls;
+  d.innerHTML = `<div class="${cls === 'ev' ? 'k' : 'v'}"></div><div class="${cls === 'ev' ? 'c' : 'r'}"></div>`;
+  d.children[0].textContent = title;
+  d.children[1].textContent = body;
+  box.prepend(d);
+}
+
+function handle(e){
+  switch (e.kind) {
+    case 'state':
+      setState(e.name, e.detail);
+      break;
+    case 'user':
+      setLine(e.text, 'user');
+      if (!e.final) { partialTurn = partialTurn || addTurn('user', ''); partialTurn.lastChild.textContent = e.text; }
+      else if (partialTurn) { partialTurn.lastChild.textContent = e.text; partialTurn = null; }
+      else addTurn('user', e.text);
+      break;
+    case 'agent':
+      setLine(e.text, '');
+      addTurn('agent', e.text);
+      break;
+    case 'step':
+      steps.set(e.name, e.status); renderStrip();
+      break;
+    case 'gate':
+      card('gate', e.verdict, e.verdict, e.reason);
+      if (e.verdict === 'BLOCKED') setState('blocked', "couldn't verify — not claiming success");
+      break;
+    case 'evidence':
+      card('evidence', 'ev', `${e.evidence_kind} · ${e.token}`, e.how_to_check);
+      break;
+  }
+}
+
+(function connect(){
+  const ws = new WebSocket(`ws://${location.host}/ws`);
+  ws.onmessage = m => {
+    const d = JSON.parse(m.data);
+    (Array.isArray(d) ? d : [d]).forEach(handle);
+  };
+  ws.onclose = () => setTimeout(connect, 1000);
+})();
+</script>

@@ -15,6 +15,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
+from . import events
+
 
 class StepState(str, Enum):
     PENDING = "pending"
@@ -65,6 +67,7 @@ class Ledger:
         s.state = state
         if detail:
             s.detail = detail
+        events.step(name, state.value, s.detail)
 
     @property
     def pending(self) -> list[str]:

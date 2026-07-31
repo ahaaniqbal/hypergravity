@@ -220,3 +220,5 @@ __marimo__/
 *.debug.log
 
 # Node.js (client/)
+
+server/verification_log.jsonl

@@ -17,9 +17,8 @@ from typing import Any
 import httpx
 from loguru import logger
 
-MCP_URL = os.getenv("A1_MCP", "https://hack.a1mobile.com/mcp/")
-REST_BASE = os.getenv("A1_BASE", "https://hack.a1mobile.com")
-TEAM_KEY = os.getenv("A1_TEAM_KEY", "")
+_DEFAULT_MCP = "https://hack.a1mobile.com/mcp/"
+_DEFAULT_REST = "https://hack.a1mobile.com"
 
 _PROTOCOL_VERSION = "2025-06-18"
 
@@ -32,8 +31,14 @@ class Counterparty:
     """Thin MCP client. One instance per call session."""
 
     def __init__(self, team_key: str | None = None, url: str | None = None) -> None:
-        self._team_key = team_key or TEAM_KEY
-        self._url = url or MCP_URL
+        # Read the environment here, not at import time: callers routinely load
+        # their .env after importing this module, and a silently-empty team key
+        # gets you empty slot lists rather than an error.
+        self._team_key = team_key or os.getenv("A1_TEAM_KEY", "")
+        self._url = url or os.getenv("A1_MCP", _DEFAULT_MCP)
+        self._rest = os.getenv("A1_BASE", _DEFAULT_REST)
+        if not self._team_key:
+            raise CounterpartyError("A1_TEAM_KEY is not set — load your .env before constructing")
         self._session_id: str | None = None
         self._client = httpx.AsyncClient(timeout=20.0)
 
@@ -153,7 +158,7 @@ class Counterparty:
         is evidence.
         """
         resp = await self._client.get(
-            f"{REST_BASE}/api/bookings", headers={"X-Team-Key": self._team_key}
+            f"{self._rest}/api/bookings", headers={"X-Team-Key": self._team_key}
         )
         resp.raise_for_status()
         return resp.json().get("bookings", [])
