@@ -29,7 +29,7 @@ from .ledger import Ledger, StepState
 from .mac_calendar import CalendarError, add_verified_event, busy_cached, clashes_in
 from .mac_agent import use_app as mac_use_app
 from .mac_control import run as mac_run, tell_app as mac_tell_app
-from .web import WebError, browse, look_up
+from .web import WebError, browse, look_up, peek
 
 
 MY_PHONE = os.getenv("MY_PHONE", "")
@@ -450,7 +450,7 @@ def build_tools(ledger: Ledger, cp: Counterparty) -> tuple[ToolsSchema, dict[str
 
         async def look() -> str:
             if is_web:
-                return await look_up(target)
+                return await peek(target)
             result = await mac_run(target)
             return str(result.get("output") or result.get("reason") or "")
 

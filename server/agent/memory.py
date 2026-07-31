@@ -85,11 +85,25 @@ def _save(all_profiles: dict[str, dict]) -> None:
 
 
 def recall(phone: str) -> Profile:
+    """Load a profile, ignoring anything we no longer understand.
+
+    A stored file outlives the code that wrote it. Passing it straight into the
+    dataclass means the day a field is renamed, every returning caller's memory
+    raises on load — and a crash reading memory is far worse than forgetting one
+    preference.
+    """
     key = _key(phone)
     if not key:
         return Profile(phone="")
     raw = _load().get(key)
-    return Profile(**raw) if raw else Profile(phone=phone)
+    if not raw:
+        return Profile(phone=phone)
+
+    known = {f for f in Profile.__dataclass_fields__}
+    dropped = set(raw) - known
+    if dropped:
+        logger.info(f"memory: ignoring unknown field(s) {', '.join(sorted(dropped))}")
+    return Profile(**{k: v for k, v in raw.items() if k in known})
 
 
 def remember(profile: Profile) -> None:

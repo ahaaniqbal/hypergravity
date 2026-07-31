@@ -274,10 +274,31 @@ def _looks_like_failure(text: str) -> bool:
     return any(marker in (text or "") for marker in _FAILURE_MARKERS)
 
 
+_ELEMENT_ID = re.compile(r"\b(e\d+@s\d+)\b")
+
+
 def _first_element_id(found: str) -> str | None:
-    """Pull an element id out of find()'s text output."""
-    match = re.search(r"\b(?:id|element_id)[=:\s]+([A-Za-z0-9_\-]+)", found)
-    return match.group(1) if match else None
+    """Pull the most clickable element id out of find()'s output.
+
+    Ids look like ``e81@s1``, not ``id=…`` — a guessed regex meant every click
+    silently reported "couldn't find that" while the element was right there.
+
+    Prefer a line that advertises a Press action. A query like "Today" matches
+    both a list item and the actual button; taking whichever came first clicks
+    the wrong thing about half the time.
+    """
+    pressable: str | None = None
+    first: str | None = None
+
+    for line in (found or "").splitlines():
+        match = _ELEMENT_ID.search(line)
+        if not match:
+            continue
+        first = first or match.group(1)
+        if "actions=" in line and "Press" in line:
+            pressable = pressable or match.group(1)
+
+    return pressable or first
 
 
 async def act_on_mac(instruction: str, app: str = "") -> str:

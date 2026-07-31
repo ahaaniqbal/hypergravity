@@ -67,6 +67,32 @@ print(text)
 '''
 
 
+def _human_reason(raw: str) -> str:
+    """Turn harness noise into something worth saying out loud.
+
+    The raw failure is a Python traceback, and whatever we return here the agent
+    will read to a caller. "File admin.py line 331, in ensure_daemon" is not a
+    sentence anyone should hear on the phone.
+    """
+    text = raw or ""
+    if "remote-debugging" in text or "CDP WS handshake" in text:
+        return (
+            "Chrome isn't allowing remote control at the moment — it needs "
+            "re-approving at chrome://inspect."
+        )
+    if "didn't come up" in text or "daemon" in text:
+        return "The browser connection isn't up."
+    if "timed out" in text.lower():
+        return "The page took too long."
+
+    # Otherwise the last line that isn't traceback scaffolding.
+    for line in reversed(text.strip().splitlines()):
+        line = line.strip()
+        if line and not line.startswith(("File ", "Traceback", "  ", "~", "^")):
+            return line[:140]
+    return "the browser didn't respond"
+
+
 async def _harness(script: str) -> str:
     proc = await asyncio.create_subprocess_exec(
         HARNESS,
@@ -162,7 +188,7 @@ async def browse(steps: list[dict[str, Any]]) -> str:
 
     raw = await _harness(_steps_script(steps))
     if "===TEXT===" not in raw:
-        raise WebError(raw.strip()[-300:] or "the browser returned nothing")
+        raise WebError(_human_reason(raw))
 
     trace = raw.partition("===LOG===")[2].partition("===TITLE===")[0].strip()
     head, _, body = raw.partition("===TEXT===")
@@ -177,6 +203,34 @@ async def browse(steps: list[dict[str, Any]]) -> str:
     return f"WHAT I DID: {trace}\n\nPAGE: {title}\n\n{body or '(the page had no readable text)'}"
 
 
+async def peek(url: str) -> str:
+    """Read a page and close the tab behind you.
+
+    For anything on a repeating schedule. ``look_up`` opens a new tab each time,
+    which is right for a one-off the user is watching happen — but a watcher
+    checking every two minutes for an hour leaves thirty tabs in someone's
+    browser, and they'd be entitled to be annoyed about it.
+    """
+    script = f'''
+new_tab({url!r})
+wait_for_load()
+import time; time.sleep(2)
+print("===TEXT===")
+try:
+    print(js("document.body.innerText"))
+except Exception:
+    print("")
+try:
+    close_tab()
+except Exception:
+    pass
+'''
+    raw = await _harness(script)
+    body = raw.partition("===TEXT===")[2]
+    body = re.sub(r"\n{2,}", "\n", body).strip()
+    return body[:MAX_TEXT]
+
+
 async def look_up(query_or_url: str) -> str:
     """Open a page (or search) in the user's Chrome and read it back.
 
@@ -189,7 +243,7 @@ async def look_up(query_or_url: str) -> str:
     raw = await _harness(_script(url))
 
     if "===TEXT===" not in raw:
-        raise WebError(raw.strip()[-300:] or "the browser returned nothing")
+        raise WebError(_human_reason(raw))
 
     head, _, body = raw.partition("===TEXT===")
     title = head.partition("===TITLE===")[2].strip().splitlines()
