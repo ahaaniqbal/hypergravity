@@ -222,7 +222,7 @@ async def book_restaurant_table(name: str, party_size: int, time_slot: str, note
     led = _ledger()
 
     async def run(cp: Counterparty):
-        led.party_name, led.requested_slot, led.party_size = name, time_slot, party_size
+        led.note(name=name, slot=time_slot, party_size=party_size)
         led.mark("book table", StepState.PENDING)
 
         resp = await cp.create_booking(

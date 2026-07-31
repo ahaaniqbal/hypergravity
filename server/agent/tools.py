@@ -63,9 +63,7 @@ def build_tools(ledger: Ledger, cp: Counterparty) -> tuple[ToolsSchema, dict[str
         size = int(a.get("party_size") or 0)
         phone = str(a.get("phone", "")).strip()
 
-        ledger.party_name, ledger.requested_slot, ledger.party_size = name, slot, size
-        if phone:
-            ledger.caller_phone = phone
+        ledger.note(name=name, slot=slot, party_size=size, phone=phone or None)
         ledger.mark("book table", StepState.PENDING)
 
         try:

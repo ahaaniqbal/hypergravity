@@ -87,6 +87,31 @@ class Ledger:
 
     # -- evidence ---------------------------------------------------------
 
+    def note(
+        self,
+        *,
+        name: str | None = None,
+        party_size: int | None = None,
+        slot: str | None = None,
+        phone: str | None = None,
+    ) -> None:
+        """Record what we've learned about the request, and persist it.
+
+        Details used to be assigned as plain attributes, which never hit disk:
+        only ``mark`` and ``record_evidence`` save. A call that took the caller's
+        name and then handed over mid-flight lost it, and the next leg asked for
+        it again — exactly the re-interrogation the handoff exists to avoid.
+        """
+        if name:
+            self.party_name = name
+        if party_size:
+            self.party_size = party_size
+        if slot:
+            self.requested_slot = slot
+        if phone:
+            self.caller_phone = phone
+        save()
+
     def record_evidence(self, kind: str, token: str, payload: dict[str, Any]) -> None:
         """Called ONLY from tool handlers, with what the counterparty returned."""
         self.verified.setdefault(kind, {})[str(token)] = payload

@@ -32,6 +32,9 @@ from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.stt import CartesiaSTTService
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.transports.base_transport import BaseTransport
+from pipecat.turns.user_stop.turn_analyzer_user_turn_stop_strategy import (
+    TurnAnalyzerUserTurnStopStrategy,
+)
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 from pipecat.workers.runner import WorkerRunner
 
@@ -124,7 +127,13 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
         context,
         user_params=LLMUserAggregatorParams(
             vad_analyzer=SileroVADAnalyzer(),
-            turn_analyzer=turn_analyzer,
+            # The analyzer is passed through a stop *strategy*, not directly —
+            # LLMUserAggregatorParams takes no turn_analyzer argument, and passing
+            # one raises only when the pipeline is built, so the bot imports
+            # cleanly and then dies the moment a call arrives.
+            user_turn_strategies=[
+                TurnAnalyzerUserTurnStopStrategy(turn_analyzer=turn_analyzer),
+            ],
         ),
     )
 
