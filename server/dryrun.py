@@ -140,7 +140,7 @@ async def turn(client, convo, tools, handlers, user_text: str) -> None:
 async def main() -> None:
     fabricate = "--fabricate" in sys.argv
     ledger = get_ledger(f"dryrun-{uuid.uuid4().hex[:6]}")
-    ledger.caller_phone = os.getenv("A1_PHONE_NUMBER", "+15674300077")
+    ledger.caller_phone = os.getenv("MY_PHONE", "")  # trusted, so Mac tools run
     cp = Counterparty()
     schemas, handlers = build_tools(ledger, cp)
     tools = _to_openai_tools(schemas)

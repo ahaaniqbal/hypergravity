@@ -11,6 +11,7 @@ mic can be finished over the phone.
 from __future__ import annotations
 
 import json
+import os
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -41,6 +42,8 @@ class Ledger:
     task_id: str
     goal: str = ""
     caller_phone: str = ""
+    # Who this task belongs to: an E.164 number, or DESK for VoiceOS work.
+    owner: str = ""
 
     # What the user asked for, as we currently understand it.
     party_name: str = ""
@@ -158,6 +161,7 @@ def _serialise(led: Ledger) -> dict[str, Any]:
         "task_id": led.task_id,
         "goal": led.goal,
         "caller_phone": led.caller_phone,
+        "owner": led.owner,
         "party_name": led.party_name,
         "party_size": led.party_size,
         "requested_slot": led.requested_slot,
@@ -172,6 +176,7 @@ def _deserialise(d: dict[str, Any]) -> Ledger:
         task_id=d["task_id"],
         goal=d.get("goal", ""),
         caller_phone=d.get("caller_phone", ""),
+        owner=d.get("owner", ""),
         party_name=d.get("party_name", ""),
         party_size=d.get("party_size", 0),
         requested_slot=d.get("requested_slot", ""),
@@ -221,15 +226,32 @@ def all_ledgers() -> dict[str, Ledger]:
 RESUME_WINDOW_SECONDS = 30 * 60
 
 
-def open_task(base: str = "hypergravity-live", now: float | None = None) -> Ledger:
-    """The task a new caller should land on.
+DESK = "desk"  # owner value for work begun through VoiceOS, which has no number
 
-    Resumes an existing one only when it is recent, has been started, and has
-    no verified booking yet — the genuine mid-flight case the desk-to-phone
-    handoff is for. Otherwise starts a fresh task so the call begins clean.
+
+def open_task(
+    base: str = "hypergravity-live",
+    caller: str | None = None,
+    now: float | None = None,
+) -> Ledger:
+    """The task this caller should land on.
+
+    Resumes an existing one only when it is recent, started, unfinished **and
+    theirs** — the genuine mid-flight case the desk-to-phone handoff is for.
+    Otherwise starts a fresh task so the call begins clean.
+
+    Ownership matters more than it looks. Without it, any recent unfinished task
+    was fair game for whoever rang next: a judge dialling in while a booking was
+    half-done at the desk would be dropped into the middle of someone else's
+    conversation, and two callers in a row would trample each other. A desk task
+    is claimable only by the owner's own handset, so strangers always start
+    clean.
     """
     _load()
     now = now or time.time()
+
+    me = os.getenv("MY_PHONE", "")
+    caller = (caller or "").strip()
 
     for led in _LEDGERS.values():
         if not led.task_id.startswith(base):
@@ -240,12 +262,28 @@ def open_task(base: str = "hypergravity-live", now: float | None = None) -> Ledg
             continue  # never started
         if now - led.created_at > RESUME_WINDOW_SECONDS:
             continue  # stale
+
+        mine = caller and led.owner == caller
+        # The handoff: desk work is picked up by the owner's own handset only.
+        handoff = led.owner == DESK and caller and me and caller == me
+        if not (mine or handoff):
+            continue
+
+        if handoff:
+            led.owner = caller  # it's theirs now; nobody else can take it
+            save()
         return led
 
     # Second-resolution ids collide when two calls land in the same second, and
     # the second one silently overwrites the first task's ledger.
     fresh = f"{base}-{int(now)}-{uuid.uuid4().hex[:6]}"
-    _LEDGERS[fresh] = Ledger(task_id=fresh, created_at=now)
+    _LEDGERS[fresh] = Ledger(
+        task_id=fresh,
+        created_at=now,
+        owner=caller or DESK,
+        caller_phone=caller or "",
+    )
+    save()
     return _LEDGERS[fresh]
 
 

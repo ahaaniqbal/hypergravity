@@ -67,16 +67,22 @@ IDLE_SECONDS = float(os.getenv("IDLE_SECONDS", "9"))
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> None:
     """Assemble and run one session on whichever transport was handed to us."""
-    ledger = open_task(TASK_BASE)
+    # Who is calling has to be known *before* the task is opened: it decides
+    # whether this call resumes existing work or starts clean. Opening first and
+    # attaching the number afterwards let whoever rang next drop into a stranger's
+    # half-finished booking.
+    call_data = getattr(runner_args, "call_data", None)
+    caller = getattr(call_data, "from_number", None) if call_data else None
+
+    ledger = open_task(TASK_BASE, caller=caller)
+    if caller:
+        ledger.note(phone=caller)
+        logger.info(f"caller: {caller} → task {ledger.task_id}")
+
     counterparty = Counterparty()
 
     # Pill + judges' panel, served alongside the call from this same loop.
     ui_server.start()
-
-    call_data = getattr(runner_args, "call_data", None)
-    if call_data and getattr(call_data, "from_number", None):
-        ledger.caller_phone = call_data.from_number
-        logger.info(f"caller: {ledger.caller_phone}")
 
     # Cartesia for both legs: Deepgram signup was down on the day, and Cartesia's
     # Live STT runs on the key we already had. One vendor, one failure domain.

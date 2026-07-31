@@ -17,6 +17,7 @@ from pipecat.services.llm_service import FunctionCallParams
 import json
 import os
 
+from .authz import REFUSAL, may_use
 from .background import running_jobs, start as start_background
 from .counterparty import Counterparty, CounterpartyError
 from .gate import FabricationBlocked, claim_success, report
@@ -32,6 +33,25 @@ MY_PHONE = os.getenv("MY_PHONE", "")
 
 def build_tools(ledger: Ledger, cp: Counterparty) -> tuple[ToolsSchema, dict[str, Any]]:
     """Return the schema advertised to the LLM plus a name->handler mapping."""
+
+    def _guard(name: str, handler):
+        """Wrap a handler so an untrusted caller can't reach the machine.
+
+        Enforced here rather than by hiding tools from the model: the schema is
+        the same for everyone, so the agent can explain the boundary instead of
+        behaving as though the capability never existed.
+        """
+
+        async def guarded(params: FunctionCallParams) -> None:
+            if not may_use(name, ledger.caller_phone):
+                ledger.mark(f"{name} (refused)", StepState.FAILED, "caller not recognised")
+                await params.result_callback(
+                    {"allowed": False, "reason": REFUSAL, "you_must_say": REFUSAL}
+                )
+                return
+            await handler(params)
+
+        return guarded
 
     # -- counterparty: look --------------------------------------------------
 
@@ -596,5 +616,5 @@ def build_tools(ledger: Ledger, cp: Counterparty) -> tuple[ToolsSchema, dict[str
         ),
     ]
 
-    handlers = {s.name: s.handler for s in schemas}
+    handlers = {s.name: _guard(s.name, s.handler) for s in schemas}
     return ToolsSchema(standard_tools=schemas), handlers
