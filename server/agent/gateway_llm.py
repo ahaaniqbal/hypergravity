@@ -29,8 +29,15 @@ from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.services.openai.responses.llm import OpenAIResponsesHttpLLMService
 from pipecat.services.settings import assert_given
 
-# Params the gateway rejects outright.
-_UNSUPPORTED = ("stream", "store", "include")
+# Params the gateway rejects outright. Discovered one production failure at a
+# time, which is why _gateway_post now learns the rest by itself.
+_UNSUPPORTED = ("stream", "store", "include", "reasoning")
+
+# The gateway names the offending field: {"message": "X is not supported",
+# "param": "X"}. Anything it names gets dropped and the call retried, so the
+# next unknown restriction costs one retry instead of a dead conversation.
+_UNSUPPORTED_RE = re.compile(r"\b(\w+) is not supported\b", re.I)
+_LEARNED: set[str] = set()
 
 # Tool results are presented as observed fact rather than as a tool message,
 # because this gateway drops the call_id that would otherwise bind them.
@@ -156,7 +163,18 @@ class A1GatewayLLMService(OpenAIResponsesHttpLLMService):
             cut = min(cut, i)
         return list(messages[:cut]) if cut < len(messages) else list(messages)
 
-    async def _gateway_post(self, params: dict[str, Any]) -> dict[str, Any]:
+    async def _gateway_post(self, params: dict[str, Any], _retries: int = 3) -> dict[str, Any]:
+        """POST, dropping any field the gateway objects to and trying again.
+
+        Every unsupported param so far has cost a live call to discover: the
+        caller hears an apology, we read the log afterwards, and add one more
+        name to a list. Since the error says exactly which field it disliked,
+        the adapter can do that itself and lose a retry instead of a
+        conversation.
+        """
+        for name in _LEARNED:
+            params.pop(name, None)
+
         resp = await self._http.post(
             f"{self._gw_base}/responses",
             headers={
@@ -166,8 +184,19 @@ class A1GatewayLLMService(OpenAIResponsesHttpLLMService):
             json=params,
         )
         body = resp.json()
-        if isinstance(body, dict) and body.get("error"):
-            raise RuntimeError(f"gateway rejected request: {body['error']}")
+
+        if isinstance(body, dict) and (err := body.get("error")):
+            message = str(err.get("message", ""))
+            offender = err.get("param") or (
+                m.group(1) if (m := _UNSUPPORTED_RE.search(message)) else None
+            )
+            if offender and offender in params and _retries > 0:
+                _LEARNED.add(offender)
+                logger.warning(f"gateway rejects {offender!r} — dropping it and retrying")
+                params.pop(offender, None)
+                return await self._gateway_post(params, _retries - 1)
+            raise RuntimeError(f"gateway rejected request: {err}")
+
         resp.raise_for_status()
         return body
 

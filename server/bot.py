@@ -121,10 +121,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
         settings=A1GatewayLLMService.Settings(
             model=MODEL,
             system_instruction=SYSTEM_INSTRUCTION,
-            # Every turn was spending 35-50 tokens on reasoning for what is
-            # essentially "pick a tool and say one sentence". Minimal effort
-            # keeps the tool choice while cutting time-to-first-word.
-            reasoning=A1GatewayLLMService.ReasoningConfig(effort="minimal"),
+            # No reasoning config: this gateway rejects the field outright.
+            # The adapter strips it anyway, but asking for it was pointless.
         ),
     )
 
