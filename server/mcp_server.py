@@ -28,7 +28,7 @@ load_dotenv(dotenv_path=Path(__file__).resolve().parent.parent / ".env", overrid
 
 from agent.counterparty import Counterparty  # noqa: E402  (needs env first)
 from agent.gate import FabricationBlocked, claim_success, report  # noqa: E402
-from agent.ledger import StepState, get_ledger  # noqa: E402
+from agent.ledger import StepState, open_task  # noqa: E402
 from agent.mac_calendar import CalendarError, add_verified_event  # noqa: E402
 
 TASK_ID = os.getenv("TASK_ID", "hypergravity-live")
@@ -38,7 +38,7 @@ mcp = MCPServer("hypergravity")
 
 
 def _ledger():
-    return get_ledger(TASK_ID)
+    return open_task(TASK_ID)
 
 
 async def _with_counterparty(fn):

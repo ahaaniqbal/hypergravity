@@ -36,7 +36,7 @@ from pipecat.workers.runner import WorkerRunner
 from agent import events, ui_server
 from agent.counterparty import Counterparty
 from agent.gateway_llm import A1GatewayLLMService
-from agent.ledger import get_ledger
+from agent.ledger import open_task
 from agent.prompt import SYSTEM_INSTRUCTION
 from agent.tools import build_tools
 
@@ -49,14 +49,15 @@ GATEWAY_BASE_URL = os.getenv(
 )
 MODEL = os.getenv("OPENAI_MODEL", "openai.gpt-5.6-sol")
 
-# One shared task id so a call and a desk session land on the same ledger.
-# In a fuller build this would key off the caller's number.
-ACTIVE_TASK_ID = os.getenv("TASK_ID", "hypergravity-live")
+# Which task a caller lands on is decided per call by ledger.open_task(): it
+# resumes genuinely unfinished work (the desk-to-phone handoff) and otherwise
+# starts fresh, so a completed booking is never replayed at a new caller.
+TASK_BASE = os.getenv("TASK_ID", "hypergravity-live")
 
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> None:
     """Assemble and run one session on whichever transport was handed to us."""
-    ledger = get_ledger(ACTIVE_TASK_ID)
+    ledger = open_task(TASK_BASE)
     counterparty = Counterparty()
 
     # Pill + judges' panel, served alongside the call from this same loop.
@@ -194,35 +195,28 @@ def _human_step(names: str) -> str:
 
 
 async def bot(runner_args: RunnerArguments):
-    """Entry point — builds the Telnyx transport by hand.
+    """Entry point. ``create_transport`` wires the Telnyx serializer.
 
-    ``create_transport`` would do this for us, but it constructs
-    ``TelnyxFrameSerializer`` with ``auto_hang_up`` left at its default of True,
-    which requires a ``TELNYX_API_KEY`` to call the hangup REST endpoint. We
-    don't have one: a1mobile fronts Telnyx and issues only SIP credentials, so
-    the serializer raised before a single audio frame moved and the caller heard
-    silence on an answered line.
+    Note on ``TELNYX_API_KEY``: the serializer defaults ``auto_hang_up=True`` and
+    refuses to construct without a key, which killed the transport before any
+    audio moved — an answered line with silence. a1mobile fronts Telnyx and
+    issues only SIP credentials, so we have no key.
 
-    Turning auto_hang_up off costs nothing here — the call ends when the caller
-    hangs up or the websocket closes, which is what we want anyway.
+    We set a placeholder rather than building the transport by hand, because the
+    runner parses ``call_data`` (stream_id, call_control_id, encoding) out of the
+    websocket handshake *inside* ``create_transport``; bypassing it leaves that
+    None. The only cost is one doomed REST call at hangup, which the serializer
+    already wraps in try/except — by then the call is over anyway.
     """
-    from pipecat.serializers.telnyx import TelnyxFrameSerializer
-    from pipecat.transports.websocket.fastapi import FastAPIWebsocketTransport
+    os.environ.setdefault("TELNYX_API_KEY", "unused-a1mobile-fronts-telnyx")
 
-    call_data = runner_args.call_data
-    params = FastAPIWebsocketParams(
-        audio_in_enabled=True,
-        audio_out_enabled=True,
-        add_wav_header=False,  # always false for telephony
-    )
-    params.serializer = TelnyxFrameSerializer(
-        stream_id=call_data["stream_id"],
-        call_control_id=call_data["call_id"],
-        outbound_encoding=call_data["outbound_encoding"],
-        inbound_encoding="PCMU",
-        params=TelnyxFrameSerializer.InputParams(auto_hang_up=False),
-    )
-    transport = FastAPIWebsocketTransport(websocket=runner_args.websocket, params=params)
+    transport_params = {
+        "telnyx": lambda: FastAPIWebsocketParams(
+            audio_in_enabled=True,
+            audio_out_enabled=True,
+        ),
+    }
+    transport = await create_transport(runner_args, transport_params)
     await run_bot(transport, runner_args)
 
 

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import time
+import uuid
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -186,3 +187,47 @@ def get_ledger(task_id: str) -> Ledger:
 def all_ledgers() -> dict[str, Ledger]:
     _load()
     return _LEDGERS
+
+
+# A task counts as still open only while there is real work outstanding. A
+# finished one must never be resumed: a caller who says "hello" on a fresh call
+# should not have last hour's booking driven to completion around them, which is
+# exactly what happened when any non-empty ledger was treated as resumable.
+RESUME_WINDOW_SECONDS = 30 * 60
+
+
+def open_task(base: str = "hypergravity-live", now: float | None = None) -> Ledger:
+    """The task a new caller should land on.
+
+    Resumes an existing one only when it is recent, has been started, and has
+    no verified booking yet — the genuine mid-flight case the desk-to-phone
+    handoff is for. Otherwise starts a fresh task so the call begins clean.
+    """
+    _load()
+    now = now or time.time()
+
+    for led in _LEDGERS.values():
+        if not led.task_id.startswith(base):
+            continue
+        if led.verified.get("booking"):
+            continue  # done — nothing to resume
+        if not led.steps:
+            continue  # never started
+        if now - led.created_at > RESUME_WINDOW_SECONDS:
+            continue  # stale
+        return led
+
+    # Second-resolution ids collide when two calls land in the same second, and
+    # the second one silently overwrites the first task's ledger.
+    fresh = f"{base}-{int(now)}-{uuid.uuid4().hex[:6]}"
+    _LEDGERS[fresh] = Ledger(task_id=fresh, created_at=now)
+    return _LEDGERS[fresh]
+
+
+def reset() -> None:
+    """Clear everything. For rehearsing the demo from a known-clean state."""
+    _LEDGERS.clear()
+    try:
+        STORE.unlink()
+    except OSError:
+        pass

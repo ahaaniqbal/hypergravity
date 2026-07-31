@@ -113,10 +113,30 @@ class A1GatewayLLMService(OpenAIResponsesHttpLLMService):
         resp.raise_for_status()
         return body
 
+    @staticmethod
+    def _clean_tools(tools: Any) -> Any:
+        """Drop null-valued keys from each tool definition.
+
+        Pipecat emits ``"strict": null`` to mean "unset". The gateway's validator
+        treats a null there as a malformed definition and rejects the whole array
+        with "tools must contain function definitions" — which points at the
+        wrong thing entirely. Omitting the key, or sending a real boolean, is
+        accepted.
+        """
+        if not isinstance(tools, list):
+            return tools
+        return [
+            {k: v for k, v in tool.items() if v is not None} if isinstance(tool, dict) else tool
+            for tool in tools
+        ]
+
     def _sanitize(self, params: dict[str, Any]) -> dict[str, Any]:
         """Strip what the gateway refuses; fold instructions into the input."""
         for key in _UNSUPPORTED:
             params.pop(key, None)
+
+        if "tools" in params:
+            params["tools"] = self._clean_tools(params["tools"])
 
         messages = flatten_input(list(params.get("input") or []))
 

@@ -42,8 +42,12 @@ async def create_event(
     title: str, hour: int, minute: int, notes: str = "", calendar: str = DEFAULT_CALENDAR
 ) -> str:
     """Create today's event and return its UID."""
+    # `launch` starts Calendar without bringing it to the front — without it the
+    # script fails with -600 "Application isn't running" whenever the app is
+    # closed, which on a demo machine is most of the time.
     script = f'''
     tell application "Calendar"
+      launch
       tell calendar "{calendar}"
         set theStart to (current date)
         set hours of theStart to {hour}
@@ -66,6 +70,7 @@ async def read_event(uid: str, calendar: str = DEFAULT_CALENDAR) -> dict[str, st
     """Independently re-read the event. None means it is not really there."""
     script = f'''
     tell application "Calendar"
+      launch
       tell calendar "{calendar}"
         set matches to (every event whose uid is "{uid}")
         if (count of matches) is 0 then return ""
