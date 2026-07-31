@@ -532,9 +532,10 @@ def build_tools(ledger: Ledger, cp: Counterparty) -> tuple[ToolsSchema, dict[str
                 "job_id": job.job_id,
                 "will_text": notify,
                 "instruction": (
-                    "Tell the caller you're on it and that you'll text them when it's "
-                    "done, so they can hang up. Say it in one sentence. Do NOT wait for "
-                    "the result and do NOT describe what it will say."
+                    "Tell the caller you're on it and that you'll CALL THEM BACK and "
+                    "text when it's done, so they can hang up now. Say it in one "
+                    "sentence. Do NOT wait for the result and do NOT describe what it "
+                    "will say."
                 ),
             }
         )

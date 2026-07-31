@@ -19,13 +19,15 @@ moment it would be easiest to send a cheerful nothing instead.
 from __future__ import annotations
 
 import asyncio
+import os
 import time
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
 
 from loguru import logger
 
-from . import events
+from . import events, sip
+from .callback import call_and_say
 from .counterparty import Counterparty, sms_delivered as _sms_delivered
 from .ledger import StepState, get_ledger
 
@@ -38,6 +40,7 @@ class Job:
     what: str
     task_id: str
     notify: str
+    call_back: bool = True
     started_at: float = field(default_factory=time.time)
     finished_at: float | None = None
     ok: bool | None = None
@@ -81,6 +84,22 @@ def _phrase(job: Job) -> str:
     return f"{head} ({took}).\n\n{body}" if body else f"{head} ({took})."
 
 
+def _spoken(job: Job) -> str:
+    """The first line of the call-back. Spoken verbatim, so it has to sound spoken.
+
+    Deliberately not the SMS text: a text can carry a URL and a paragraph, a
+    phone call answered by a startled person cannot. Say who it is, what it is
+    about, and whether it worked — then stop and let them talk.
+    """
+    who = os.getenv("OWNER_NAME", "").strip()
+    hello = f"Hey {who}, it's your Mac." if who else "Hey, it's your Mac."
+    if job.ok:
+        return f"{hello} That thing you asked for — {job.what} — is done."
+    reason = (job.result or "").strip().replace("\n", " ")
+    tail = f" {reason[:110]}" if reason else ""
+    return f"{hello} I couldn't finish {job.what}, and I didn't want to leave you hanging.{tail}"
+
+
 async def _notify(job: Job) -> None:
     """Text the result. Its own counterparty: the call's was closed at hangup."""
     if not job.notify:
@@ -106,6 +125,17 @@ async def _notify(job: Job) -> None:
         job.notified = True
         await cp.aclose()
 
+    # Then ring them. The text is the record; the call is the point — you asked
+    # for something slow, hung up, and your Mac rings back to tell you. It goes
+    # after the SMS deliberately: the evidence should already be on the handset
+    # by the time they pick up, and a call that fails must not cost them the
+    # result. Sending both is not redundancy — the text survives a missed call.
+    if job.call_back and sip.configured():
+        try:
+            await call_and_say(job.notify, _spoken(job), job.task_id)
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"job {job.job_id} call-back failed: {e}")
+
 
 async def _supervise(job: Job, work: Callable[[], Awaitable[Any]]) -> None:
     ledger = get_ledger(job.task_id)
@@ -127,14 +157,20 @@ async def _supervise(job: Job, work: Callable[[], Awaitable[Any]]) -> None:
         await _notify(job)
 
 
-def start(what: str, task_id: str, notify: str, work: Callable[[], Awaitable[Any]]) -> Job:
+def start(
+    what: str,
+    task_id: str,
+    notify: str,
+    work: Callable[[], Awaitable[Any]],
+    call_back: bool = True,
+) -> Job:
     """Kick off work and return immediately, so the caller can hang up.
 
     The task is held in a module-level set: asyncio only keeps a weak reference,
     and a garbage-collected task is a job that silently never finishes.
     """
     job_id = f"job-{len(_JOBS) + 1}-{int(time.time()) % 10000}"
-    job = Job(job_id=job_id, what=what, task_id=task_id, notify=notify)
+    job = Job(job_id=job_id, what=what, task_id=task_id, notify=notify, call_back=call_back)
     _JOBS[job_id] = job
 
     task = asyncio.create_task(_supervise(job, work))

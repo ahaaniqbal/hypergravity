@@ -11,6 +11,7 @@ Run::
     uv run bot.py -t local             # desk microphone
 """
 
+import asyncio
 import os
 import uuid
 
@@ -45,6 +46,7 @@ from pipecat.workers.runner import WorkerRunner
 
 from agent import events, receipt, ui_server
 from agent.counterparty import Counterparty
+from agent.callback import pending_opening
 from agent.fillers import line_for
 from agent.gateway_llm import A1GatewayLLMService
 from agent.ledger import StepState, open_task
@@ -79,6 +81,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
     # half-finished booking.
     call_data = getattr(runner_args, "call_data", None)
     caller = getattr(call_data, "from_number", None) if call_data else None
+
+    # A call *we* placed carries the line it should open with. Same pipeline,
+    # same tools, same ledger — the only difference is who spoke first, so this
+    # is a lookup rather than a separate code path.
+    outbound = pending_opening(getattr(call_data, "stream_id", None) if call_data else None)
 
     ledger = open_task(TASK_BASE, caller=caller)
     profile = start_call(caller or "")
@@ -233,7 +240,26 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
     async def on_client_connected(transport, client):
         logger.info("connected")
         resumed = bool(ledger.done or ledger.verified)
-        if resumed:
+        if outbound:
+            # We rang them. They have no idea why their phone is buzzing, so the
+            # first sentence has to carry the reason — spoken straight to TTS,
+            # because making the model compose it costs two seconds of a stranger
+            # holding a silent handset they didn't ask to be holding.
+            opener = outbound["opening"]
+            await worker.queue_frames([TTSSpeakFrame(opener)])
+            context.add_message({"role": "assistant", "content": opener})
+            context.add_message(
+                {
+                    "role": "developer",
+                    "content": (
+                        "You called them, they did not call you. You have just "
+                        "said the line above. Do not greet them again or ask what "
+                        "they need. Wait for their reply, then help from there.\n"
+                        f"{ledger.summary()}"
+                    ),
+                }
+            )
+        elif resumed:
             # The handoff: pick the task up mid-flight rather than starting over.
             context.add_message(
                 {
@@ -363,7 +389,8 @@ def _install_texml_route() -> None:
     with the existing ``websocket /ws`` upgrade. Telnyx POSTs here for the XML,
     then connects to the very same path for audio.
     """
-    from fastapi.responses import HTMLResponse
+    from fastapi import Request
+    from fastapi.responses import HTMLResponse, JSONResponse
     from pipecat.runner.run import app
 
     proxy = os.getenv("TUNNEL_HOST", "")
@@ -384,6 +411,30 @@ def _install_texml_route() -> None:
             ),
             media_type="application/xml",
         )
+
+    # Ring the owner on demand. This has to live inside the bot's own process:
+    # the opening line is handed to the session through a module-level table, so
+    # a caller in another process would place the call and then lose the reason
+    # for it. It also gives the call-back a trigger that doesn't require waiting
+    # out a real background job.
+    @app.post("/call-me")
+    async def call_me(request: Request):
+        from agent.callback import call_and_say
+        from agent.sip import CALLER_ID, configured
+
+        if not configured():
+            return JSONResponse({"error": "SIP is not configured"}, status_code=503)
+        body = await request.json() if await request.body() else {}
+        to = str(body.get("to") or os.getenv("MY_PHONE", "")).strip()
+        if not to:
+            return JSONResponse({"error": "no number to call"}, status_code=400)
+        opening = str(body.get("opening") or "").strip() or (
+            f"Hey {os.getenv('OWNER_NAME', 'there')}, it's your Mac. "
+            "You asked me to ring you — what do you need?"
+        )
+        # Don't block the HTTP response on a call that rings for 45 seconds.
+        asyncio.create_task(call_and_say(to, opening))
+        return JSONResponse({"calling": to, "from": CALLER_ID, "opening": opening})
 
     # Serve anything a build produced, so a text can carry a real link instead
     # of a path on a laptop the recipient is nowhere near.
