@@ -18,6 +18,8 @@ from .counterparty import Counterparty, CounterpartyError
 from .gate import FabricationBlocked, claim_success, report
 from .ledger import Ledger, StepState
 from .mac_calendar import CalendarError, add_verified_event
+from .mac_control import run as mac_run, tell_app as mac_tell_app
+from .web import WebError, look_up
 
 
 def build_tools(ledger: Ledger, cp: Counterparty) -> tuple[ToolsSchema, dict[str, Any]]:
@@ -167,6 +169,104 @@ def build_tools(ledger: Ledger, cp: Counterparty) -> tuple[ToolsSchema, dict[str
         ledger.mark("send SMS", StepState.DONE, f"to {to}")
         await params.result_callback({"sent": True, "to": to, "response": resp})
 
+    # -- the general capability: anything on the web --------------------------
+
+    async def look_up_on_the_web(params: FunctionCallParams) -> None:
+        query = str(params.arguments.get("query", "")).strip()
+        if not query:
+            await params.result_callback({"error": "nothing to look up"})
+            return
+
+        ledger.mark(f"look up: {query[:38]}", StepState.PENDING)
+        try:
+            page = await look_up(query)
+        except WebError as e:
+            ledger.mark(f"look up: {query[:38]}", StepState.FAILED, str(e))
+            await params.result_callback(
+                {
+                    "found": False,
+                    "reason": str(e),
+                    "instruction": "Say the page would not load. Do not guess what it said.",
+                }
+            )
+            return
+
+        ledger.mark(f"look up: {query[:38]}", StepState.DONE)
+        await params.result_callback(
+            {
+                "found": True,
+                "page_text": page,
+                "instruction": (
+                    "This is what the page actually said. Answer from it in one or two "
+                    "spoken sentences, best option first. If it does not contain the "
+                    "answer, say so — do not fill the gap from memory. You have only "
+                    "READ this; you have not acted on it."
+                ),
+            }
+        )
+
+    # -- do anything on the machine -------------------------------------------
+
+    async def run_on_mac(params: FunctionCallParams) -> None:
+        command = str(params.arguments.get("command", "")).strip()
+        if not command:
+            await params.result_callback({"error": "no command given"})
+            return
+
+        label = f"run: {command[:34]}"
+        ledger.mark(label, StepState.PENDING)
+        result = await mac_run(command, str(params.arguments.get("cwd", "")) or None)
+
+        if result.get("refused"):
+            ledger.mark(label, StepState.FAILED, "refused")
+            await params.result_callback({**result, "instruction": "Say exactly why you won't."})
+            return
+        if not result.get("ran") or not result.get("succeeded"):
+            ledger.mark(label, StepState.FAILED, str(result.get("reason", "failed")))
+            await params.result_callback(
+                {
+                    **result,
+                    "instruction": (
+                        "This did NOT succeed. Say so and read the error briefly. "
+                        "Do not describe the intended effect as though it happened."
+                    ),
+                }
+            )
+            return
+
+        ledger.mark(label, StepState.DONE)
+        await params.result_callback(
+            {
+                **result,
+                "instruction": (
+                    "This is the real output. Answer from it in one or two spoken "
+                    "sentences. Report only what it shows."
+                ),
+            }
+        )
+
+    async def control_app(params: FunctionCallParams) -> None:
+        a = params.arguments
+        app = str(a.get("app", "")).strip()
+        script = str(a.get("applescript", "")).strip()
+        if not app or not script:
+            await params.result_callback({"error": "need both an app and a script"})
+            return
+
+        label = f"{app}: {script[:26]}"
+        ledger.mark(label, StepState.PENDING)
+        result = await mac_tell_app(app, script)
+        ledger.mark(label, StepState.DONE if result.get("ok") else StepState.FAILED)
+        await params.result_callback(
+            {
+                **result,
+                "instruction": (
+                    "Report only what came back. If ok is false, say the app refused "
+                    "and why — do not claim the action happened."
+                ),
+            }
+        )
+
     # -- the caller's own machine --------------------------------------------
 
     async def add_to_calendar(params: FunctionCallParams) -> None:
@@ -232,6 +332,63 @@ def build_tools(ledger: Ledger, cp: Counterparty) -> tuple[ToolsSchema, dict[str
     # -- schemas --------------------------------------------------------------
 
     schemas = [
+        FunctionSchema(
+            name="look_up_on_the_web",
+            description=(
+                "Look anything up in the user's own Chrome — logged in, on their screen — "
+                "and read back what the page actually says. Flights, prices, opening "
+                "hours, a menu, a dashboard. Use this whenever you are asked something "
+                "you do not already know. Reading a page is not acting on it."
+            ),
+            properties={
+                "query": {
+                    "type": "string",
+                    "description": (
+                        "What to search for, or a full URL. Write it the way a search "
+                        "box wants it, not the way it was spoken: for flights use airport "
+                        "codes and drop filler, so 'when's the latest flight from San "
+                        "Francisco to LA tomorrow' becomes 'flights from SFO to LAX "
+                        "tomorrow'. A precise query lands on the answer; a chatty one "
+                        "lands on a homepage."
+                    ),
+                },
+            },
+            required=["query"],
+            handler=look_up_on_the_web,
+        ),
+        FunctionSchema(
+            name="run_on_mac",
+            description=(
+                "Run a shell command on this Mac and read back what it printed. This is "
+                "how you do anything that is not a web page: inspect or edit files, run "
+                "or write code, use git, open an app with 'open -a', check the system. "
+                "Prefer one command that answers the question outright."
+            ),
+            properties={
+                "command": {"type": "string", "description": "The shell command."},
+                "cwd": {"type": "string", "description": "Directory to run it in, optional."},
+            },
+            required=["command"],
+            handler=run_on_mac,
+        ),
+        FunctionSchema(
+            name="control_app",
+            description=(
+                "Drive a Mac app through AppleScript — Mail, Notes, Messages, Music, "
+                "Finder, Numbers, Safari. Use this rather than the shell when the task "
+                "belongs to a specific app, because the scripting dictionary is a real "
+                "API. Pass only the body; the tell block is added for you."
+            ),
+            properties={
+                "app": {"type": "string", "description": "App name, e.g. 'Notes'."},
+                "applescript": {
+                    "type": "string",
+                    "description": "Script body, e.g. 'make new note with properties {name:\"Ideas\"}'.",
+                },
+            },
+            required=["app", "applescript"],
+            handler=control_app,
+        ),
         FunctionSchema(
             name="check_availability",
             description=(

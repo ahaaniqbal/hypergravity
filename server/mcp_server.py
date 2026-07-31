@@ -30,6 +30,8 @@ from agent.counterparty import Counterparty  # noqa: E402  (needs env first)
 from agent.gate import FabricationBlocked, claim_success, report  # noqa: E402
 from agent.ledger import StepState, open_task  # noqa: E402
 from agent.mac_calendar import CalendarError, add_verified_event  # noqa: E402
+from agent.mac_control import run as mac_run, tell_app as mac_tell_app  # noqa: E402
+from agent.web import WebError, look_up  # noqa: E402
 
 TASK_ID = os.getenv("TASK_ID", "hypergravity-live")
 
@@ -47,6 +49,78 @@ async def _with_counterparty(fn):
         return await fn(cp)
     finally:
         await cp.aclose()
+
+
+@mcp.tool()
+async def look_up_on_the_web(query: str) -> str:
+    """Look anything up on the web in the browser on this Mac, and read the page back.
+
+    Flights, prices, opening hours, a menu, a dashboard. Use whenever asked
+    something you do not already know. Reading a page is not acting on it — you
+    have not booked, bought or cancelled anything by calling this.
+
+    Args:
+        query: What to search for, or a full URL. Write it the way a search box
+            wants it, not the way it was spoken: for flights use airport codes and
+            drop filler, so "when's the latest flight from San Francisco to LA
+            tomorrow" becomes "flights from SFO to LAX tomorrow".
+    """
+    led = _ledger()
+    led.mark(f"look up: {query[:38]}", StepState.PENDING)
+    try:
+        page = await look_up(query)
+    except WebError as e:
+        led.mark(f"look up: {query[:38]}", StepState.FAILED, str(e))
+        return f"COULD NOT READ THE PAGE — {e}. Do not guess what it said."
+    led.mark(f"look up: {query[:38]}", StepState.DONE)
+    return page
+
+
+@mcp.tool()
+async def run_on_mac(command: str, cwd: str = "") -> str:
+    """Run a shell command on this Mac and read back what it printed.
+
+    How you do anything that is not a web page: inspect or edit files, run or
+    write code, use git, open an app with 'open -a', check the system. A command
+    that fails is reported as failed — never describe the intended effect as
+    though it happened.
+
+    Args:
+        command: The shell command.
+        cwd: Directory to run it in, optional.
+    """
+    led = _ledger()
+    label = f"run: {command[:34]}"
+    led.mark(label, StepState.PENDING)
+    r = await mac_run(command, cwd or None)
+    if r.get("refused"):
+        led.mark(label, StepState.FAILED, "refused")
+        return f"REFUSED — {r.get('reason')}"
+    if not r.get("ran") or not r.get("succeeded"):
+        led.mark(label, StepState.FAILED, str(r.get("reason", "failed")))
+        return f"FAILED (exit {r.get('exit_code')}) — {r.get('output') or r.get('reason')}"
+    led.mark(label, StepState.DONE)
+    return str(r.get("output"))
+
+
+@mcp.tool()
+async def control_app(app: str, applescript: str) -> str:
+    """Drive a Mac app through AppleScript — Mail, Notes, Messages, Music, Finder, Numbers.
+
+    Prefer this over the shell when the task belongs to a specific app: the
+    scripting dictionary is a real API rather than simulated clicks. Pass only
+    the body; the tell block is added for you.
+
+    Args:
+        app: App name, e.g. "Notes".
+        applescript: Script body, e.g. 'make new note with properties {name:"Ideas"}'.
+    """
+    led = _ledger()
+    label = f"{app}: {applescript[:26]}"
+    led.mark(label, StepState.PENDING)
+    r = await mac_tell_app(app, applescript)
+    led.mark(label, StepState.DONE if r.get("ok") else StepState.FAILED)
+    return str(r.get("result")) if r.get("ok") else f"{app} refused — {r.get('reason')}"
 
 
 @mcp.tool()

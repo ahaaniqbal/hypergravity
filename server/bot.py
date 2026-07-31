@@ -182,6 +182,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
 
 # Tool names are for logs; the pill says what a person would say.
 _HUMAN = {
+    "look_up_on_the_web": "looking that up…",
+    "run_on_mac": "working on your Mac…",
+    "control_app": "opening that app…",
     "check_availability": "checking what's free…",
     "book_table": "booking the table…",
     "send_sms_confirmation": "texting the confirmation…",
