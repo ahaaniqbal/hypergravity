@@ -195,7 +195,45 @@ async def bot(runner_args: RunnerArguments):
     await run_bot(transport, runner_args)
 
 
+def _install_texml_route() -> None:
+    """Answer the TeXML voice webhook on ``/ws`` as well as ``/``.
+
+    a1mobile's ``point_number`` creates a Telnyx TeXML application, and creating
+    it a second time returns 422 — so whatever URL landed on the first
+    successful call is the one we are stuck with, and ours is ``…/ws``.
+    Pipecat serves TeXML on ``/`` and the media stream on ``/ws``.
+
+    FastAPI routes websocket and HTTP separately, so a ``POST /ws`` can coexist
+    with the existing ``websocket /ws`` upgrade. Telnyx POSTs here for the XML,
+    then connects to the very same path for audio.
+    """
+    from fastapi.responses import HTMLResponse
+    from pipecat.runner.run import app
+
+    proxy = os.getenv("TUNNEL_HOST", "")
+    if not proxy:
+        return
+
+    @app.post("/ws")
+    async def texml_on_ws():
+        return HTMLResponse(
+            content=(
+                '<?xml version="1.0" encoding="UTF-8"?>\n'
+                "<Response>\n"
+                "  <Connect>\n"
+                f'    <Stream url="wss://{proxy}/ws" bidirectionalMode="rtp"></Stream>\n'
+                "  </Connect>\n"
+                '  <Pause length="40"/>\n'
+                "</Response>"
+            ),
+            media_type="application/xml",
+        )
+
+    logger.info(f"TeXML also served on POST /ws → wss://{proxy}/ws")
+
+
 if __name__ == "__main__":
     from pipecat.runner.run import main
 
+    _install_texml_route()
     main()
