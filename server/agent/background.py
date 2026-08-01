@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
@@ -85,6 +86,13 @@ def _phrase(job: Job) -> str:
 
 
 _SPOKEN_LIMIT = 220
+_MONEY = re.compile(r"[$£€]\s?\d")
+# Chrome that appears on every results page and answers nothing.
+_NAVIGATION = re.compile(
+    r"^(go to|skip to|edit search|back to|jump to|sign in|log in|menu|filters?$"
+    r"|cookie|accept|close)\b",
+    re.I,
+)
 
 
 def _headline(result: str) -> str:
@@ -99,9 +107,24 @@ def _headline(result: str) -> str:
     lines = [ln.strip() for ln in (result or "").splitlines()]
     keep = [
         ln for ln in lines
-        if ln and not ln.startswith(("WHAT I DID:", "PAGE:", "===", "http"))
+        if ln
+        and not ln.startswith(("WHAT I DID:", "PAGE:", "URL:", "===", "http"))
+        and not _NAVIGATION.match(ln)
     ]
-    said = " ".join(keep).strip()
+
+    # If the page quoted prices, that is the answer and the rest is scenery.
+    # Reading a flight results page top-to-bottom gets you "Edit search form, go
+    # to flights filters, one adult, Economy" — every word of it true, none of it
+    # what was asked. Lead with the lines that carry money, and keep the line
+    # above each one, because on these pages the label ("Cheapest", "Nonstop")
+    # and the figure live on separate lines.
+    priced: list[str] = []
+    for i, ln in enumerate(keep):
+        if _MONEY.search(ln):
+            context = keep[i - 1] if i and not _MONEY.search(keep[i - 1]) else ""
+            priced.append(f"{context} {ln}".strip())
+    said = " · ".join(priced[:4]) if priced else " ".join(keep)
+    said = said.strip()
     if not said:
         return ""
     if len(said) > _SPOKEN_LIMIT:
