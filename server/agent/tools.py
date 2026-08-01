@@ -759,10 +759,12 @@ def build_tools(ledger: Ledger, cp: Counterparty) -> tuple[ToolsSchema, dict[str
                         "{\"type\": {\"into\": \"field label\", \"text\": \"…\"}}, "
                         "{\"wait\": seconds}. ALWAYS start with a go — never "
                         "assume the browser is already on the right page. "
-                        "Best is a URL that already carries the query, e.g. "
-                        "kayak.com/flights/SFO-LAX/2026-08-01 — a site's home "
-                        "page shows marketing, not answers. Add a wait of 6-8 "
-                        "after a search so results render."
+                        "Use the site the caller named. Best is a URL that "
+                        "already carries the query, e.g. "
+                        "kayak.com/flights/SFO-LAX/2026-08-01 — a home page "
+                        "shows marketing, not answers, and Google Flights "
+                        "ignores a ?q= query and lands on one. Add a wait of "
+                        "6-8 after a search so results render."
                     ),
                     "items": {"type": "object"},
                 },
