@@ -360,9 +360,39 @@ def _place(to: str) -> SipCall:
     )
 
 
+def e164(number: str) -> str:
+    """Reduce a spoken or written number to what a SIP URI can carry.
+
+    Anything upstream of here may hand us a number a person would recognise —
+    "+1 (415) 630-7160", "415-630-7160", "+1 415 630 7160". VoiceOS does exactly
+    that. A SIP request URI cannot contain spaces or parentheses, so the INVITE
+    went out addressed to something unroutable and simply rang out; the log said
+    "no answer", which is indistinguishable from nobody picking up, and sent us
+    looking at the wrong end of the system entirely.
+    """
+    raw = (number or "").strip()
+    digits = "".join(c for c in raw if c.isdigit())
+    if not digits:
+        return ""
+    if raw.startswith("+"):
+        return "+" + digits
+    # Bare ten digits is a US number missing its country code; eleven starting
+    # with 1 already has one.
+    if len(digits) == 10:
+        return "+1" + digits
+    if len(digits) == 11 and digits.startswith("1"):
+        return "+" + digits
+    return "+" + digits
+
+
 async def place_call(to: str) -> SipCall:
     """Ring ``to`` and return once they pick up. Raises SipError if they don't."""
-    return await asyncio.to_thread(_place, to)
+    number = e164(to)
+    if not number:
+        raise SipError(f"{to!r} is not a phone number I can dial")
+    if number != to:
+        logger.info(f"sip: normalised {to!r} -> {number}")
+    return await asyncio.to_thread(_place, number)
 
 
 def configured() -> bool:
