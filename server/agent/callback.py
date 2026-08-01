@@ -44,6 +44,8 @@ FRAME_BYTES = 160          # 20 ms of 8 kHz mu-law
 FRAME_SECONDS = 0.02
 SILENCE = b"\xff" * FRAME_BYTES  # mu-law zero, not 0x00
 MAX_CALL_SECONDS = float(os.getenv("HG_OUTBOUND_MAX_SECONDS", "300"))
+# Silence on the RTP socket that means the far end is gone rather than thinking.
+HANGUP_AFTER_SILENCE = float(os.getenv("HG_HANGUP_AFTER_SILENCE", "6"))
 # Generous on purpose. TTS hands us a whole utterance far faster than the 20 ms
 # per frame the wire drains it at, so the queue legitimately holds the entire
 # sentence. An earlier 2-second cap silently dropped the tail of anything longer
@@ -53,7 +55,14 @@ MAX_CALL_SECONDS = float(os.getenv("HG_OUTBOUND_MAX_SECONDS", "300"))
 JITTER_MAX_FRAMES = 3000   # ~60s
 # How long after the bot finishes to keep ignoring the line. Covers the round
 # trip plus whatever the handset's speaker leaks back into its own microphone.
-ECHO_TAIL = float(os.getenv("HG_ECHO_TAIL", "0.6"))
+#
+# Kept deliberately short. Every millisecond here is a millisecond of the caller
+# being unheard, and on an outbound call they answer the phone and start talking
+# immediately — the front of "can you check Kayak for flights to LA" was being
+# eaten, leaving a fragment that sounded like someone clearing their throat. Too
+# long is a worse failure than too short: self-interruption is obvious and
+# recoverable, silently deafening the caller for half a second is neither.
+ECHO_TAIL = float(os.getenv("HG_ECHO_TAIL", "0.25"))
 
 # What the agent should open the call with, keyed by the stream id we invent for
 # it. bot.py reads this when a session starts and finds an outbound stream id.
@@ -97,13 +106,25 @@ async def _pump_to_bot(call: sip.SipCall, ws, stop: asyncio.Event, floor: dict) 
     a conversation you can have beats one you can interrupt.
     """
     loop = asyncio.get_running_loop()
+    last_packet = time.monotonic()
     while not stop.is_set():
         try:
             packet = await asyncio.wait_for(loop.sock_recv(call.rtp, 2048), timeout=1.0)
         except asyncio.TimeoutError:
+            # A live call sends RTP continuously, comfort noise included, so a
+            # silent socket means the far end is gone. We never see the SIP BYE —
+            # nothing reads the signalling socket after the call is answered — so
+            # without this every hung-up call stayed alive until the five-minute
+            # cap, talking to itself. Three of them were running at once, each
+            # asking an empty line whether it was still there.
+            if time.monotonic() - last_packet > HANGUP_AFTER_SILENCE:
+                logger.info("callback: no RTP for "
+                            f"{HANGUP_AFTER_SILENCE:.0f}s — the caller hung up")
+                break
             continue
         except (OSError, asyncio.CancelledError):
             break
+        last_packet = time.monotonic()
         if time.monotonic() < floor["until"]:
             continue  # our own voice on its way back
         payload = _rtp_payload(packet)

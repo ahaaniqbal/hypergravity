@@ -260,7 +260,13 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
                     "content": (
                         "You called them, they did not call you. You have just "
                         "said the line above. Do not greet them again or ask what "
-                        "they need. Wait for their reply, then help from there.\n"
+                        "they need.\n"
+                        "They answered the phone mid-sentence, so their first "
+                        "words may arrive clipped. If you can tell what they're "
+                        "asking for, DO IT — never answer with 'go ahead', 'of "
+                        "course', or anything else that hands the turn back "
+                        "without doing anything. If you genuinely caught nothing, "
+                        "ask them to say it again in those words.\n"
                         f"{ledger.summary()}"
                     ),
                 }
