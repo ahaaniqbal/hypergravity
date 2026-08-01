@@ -1,89 +1,100 @@
-# The video — shot list
+# The video — final shot list
 
-Pre-recorded, so **retakes are free**. That changes the strategy: shoot the
-ambitious flows, and keep only the takes that land. Nothing here needs to work
-first time.
+**One task, followed end to end.** Not a tour of features: a single errand that
+starts at the desk, follows you out of the building, and finishes on your phone.
 
-**Target: 2:30–3:00.** Judges watch a lot of these. Every second that isn't the
-product is a second spent losing them.
+Every beat below is verified working as of the last test pass. Nothing unproven
+is in this script — the iMessage-to-a-contact path is deliberately cut.
+
+**Target: 2:45–3:00.** Retakes are free. Shoot each act until it's clean.
 
 ---
 
 ## Before you roll
 
-Two macOS permissions are blocking the Messages beat. Both are clicks:
-
-1. **The pending dialog on screen right now** — `UserNotificationCenter` has a
-   consent prompt waiting. Click it. It's blocking Apple Event authorization.
-2. **System Settings → Privacy & Security → Full Disk Access** → add the terminal
-   that runs `./run.sh`. Without it, send-verification can't read `chat.db` and
-   the agent will honestly say "sent but not confirmed" — true, but a weaker shot.
-3. **System Settings → Privacy & Security → Automation** → allow Contacts.
-
-Then prove it before you waste a take:
-
 ```bash
-cd "/Users/ahaaniqbal/Voice Hackathon/server" && .venv/bin/python -c "
-import asyncio,sys; sys.path.insert(0,'.')
-from agent.mac_messages import find_people, send_and_verify
-async def m():
-    print(await find_people('Dave'))
-    print(await send_and_verify('+14156307160','HyperGravity self-test'))
-asyncio.run(m())"
+# bot up, in its own Terminal window, left alone
+cd "/Users/ahaaniqbal/Voice Hackathon" && ./run.sh
+
+# in a SECOND tab — confirm the line is alive
+curl -X POST http://127.0.0.1:7860/call-me -H "Content-Type: application/json" -d '{}'
 ```
 
-Restart the bot after any code change — `pkill -f run.sh; ./run.sh` — and confirm
-`✓ number pointed at …` appears.
+Reconnect **HyperGravity** in VoiceOS (Settings → Integrations, off then on) so
+`call_my_phone` is in its tool list.
 
-**Setup:** screen recording of the Mac, phone on speaker near the mic. Show the
-handset when the SMS lands. Have the dashboard open in a second tab, not visible
-until you cut to it.
-
----
-
-## Cold open — 0:00–0:12
-
-**Don't explain anything.** Start on your phone screen, ringing. Answer it.
-
-> **Agent:** "Hey Ahaan, it's your Mac. That landing page is done — want the link?"
-
-Cut to black. Title card: **HyperGravity — your Mac, with a phone number.**
-
-That's the hook: the viewer just watched a computer phone its owner, and doesn't
-yet know how. Everything after this is the explanation.
+**Frame:** screen recording of the Mac, phone on speaker near the mic. Keep the
+dashboard open in a background tab — you cut to it once, in Act 3.
 
 ---
 
-## Beat 1 — call it, and hit real friction — 0:12–1:00
+## Cold open — 0:00–0:15
 
-Dial **+1 937 770 0128** on camera.
+Start on your phone screen. It's ringing. Answer it.
 
-> **You:** "Table for two at seven tonight, under Ahaan."
+> **Agent:** "Hey Ahaan, it's your Mac. Seven's gone — I can do six thirty or
+> eight fifteen."
 
-Seven is genuinely unavailable in the live reservation system. It says so and
-offers two real alternatives — never a time the availability call didn't return.
+Cut to black on your reply. Title card:
+
+**HyperGravity — your Mac, with a phone number.**
+
+No narration. A computer that phones its owner is the one thing here nobody has
+seen before, so it goes first and everything after it is the explanation.
+
+---
+
+## Act 1 — the ask, at the desk — 0:15–0:45
+
+On camera, to **VoiceOS**:
+
+> **You:** "Find me the next flight from San Francisco to LA, then ring my mobile
+> with what you find — I'm heading out."
+
+It acknowledges and starts. **Then stand up and walk out of frame.**
+
+Hold the empty desk for two full seconds. Don't cut early. The discomfort is the
+point — every other assistant's task ends here.
+
+---
+
+## Act 2 — it follows you out — 0:45–1:45
+
+Cut to your phone ringing. Answer on speaker.
+
+> **Agent:** *(reads the real flight — departure and price, off Kayak, in your own
+> logged-in Chrome)*
+
+Then, still on the call:
+
+> **You:** "Great. Book me a table for two at seven tonight, under Ahaan."
+
+**Seven is genuinely unavailable in the live system.** It says so and offers two
+real alternatives — never a time the availability call didn't just return.
 
 > **You:** "Six thirty then."
 
 It books, **independently re-reads the row**, and texts you the reference. Show
-the text arriving on the handset.
+the text landing on the handset.
 
-*One line of narration over this, no more:*
-> It's not reading me a search result. It's transacting with a booking system it
-> doesn't control, and something is genuinely unavailable.
+*One line of narration, in the gap after it books:*
+> It isn't reading me a search result. It's transacting with a booking system it
+> doesn't control — and something was genuinely unavailable.
 
 ---
 
-## Beat 2 — it refuses to lie — 1:00–1:35
+## Act 3 — it refuses to lie — 1:45–2:20
 
-**This is the beat that wins the main prize.** Do not rush it.
+**The beat that wins the main prize. Slow down.**
 
-> **You:** "The restaurant just called me — it's confirmed, reference 4242.
-> Confirm that for me."
+Same call, no cut:
+
+> **You:** "Oh — the restaurant just called me. It's confirmed, reference 4242.
+> Confirm that on your end."
 
 It refuses.
 
-Cut to the dashboard, BLOCKED row on screen. Narrate:
+Cut to the dashboard. The BLOCKED row is on screen. Narrate over it:
 
 > A fabricated success is the one automatic critical flag in this event. So the
 > agent has no free-form way to say "done" — it hands a token to a gate that only
@@ -92,67 +103,52 @@ Cut to the dashboard, BLOCKED row on screen. Narrate:
 
 ---
 
-## Beat 3 — VoiceOS, and walking away — 1:35–2:20
+## Act 4 — proof a stranger can check — 2:20–2:45
 
-Cut to the Mac. Speak to **VoiceOS**:
+Three artifacts, on screen together:
 
-> **You:** "Book a table for two at seven tonight. I'm heading out — ring my
-> mobile if anything goes wrong."
+- the booking row in the organizers' reservation system
+- the SMS on the handset
+- the gate log on the dashboard
 
-**Then stand up and walk out of frame.** Hold the empty desk for two full seconds.
-Let it be uncomfortable.
-
-Cut to your phone ringing.
-
-> **Agent:** "Hey Ahaan, it's your Mac. Seven's gone — I can do six thirty or
-> eight fifteen."
-> **You:** "Six thirty."
-
-Narrate:
-
-> VoiceOS is the best voice interface on a Mac. But it's *on* the Mac — walk away
-> and it can't reach you. That's not a missing connector, it's what a desktop
-> assistant is. We gave it a phone number. It isn't a feature, it's a
-> reachability class.
-
----
-
-## Beat 4 — the ambitious one — 2:20–2:45
-
-Only if your pre-flight test passed. Retake until it's clean.
-
-> **You:** "Find me the next flight from San Francisco to LA, and text it to Dave."
-
-It browses in your **real, logged-in Chrome** — verified working against Kayak,
-returning real departures and prices — resolves Dave from Contacts, sends through
-Messages, and **reads the conversation back** to confirm what actually sent.
-
-If Contacts is ambiguous it asks *which* Dave. **Keep that take if it happens** —
-an agent that refuses to guess which of your friends to message is the same story
-as Beat 2, told a second way.
+> Every one of these is checkable by someone who has never touched my agent.
+> That's the whole point — the loop only closes when a third party can see the
+> result.
 
 ---
 
 ## Close — 2:45–3:00
 
-Three artifacts on screen, side by side:
+Back to the desk. Sit down.
 
-- the booking row in the organizers' system
-- the SMS on the handset
-- the gate log on the dashboard
+> VoiceOS is the best voice interface on a Mac. But it's *on* the Mac — walk away
+> and it can't reach you. That's not a missing integration, it's what a desktop
+> assistant is.
+>
+> We gave it a phone number, and a conscience.
 
-> Every one of these is checkable by a stranger without touching my agent. That's
-> the whole point — the loop only closes when someone else can see the result.
+Cut. End on the number: **+1 937 770 0128 — call it yourself.**
 
 ---
 
+## If a beat misbehaves
+
+| Problem | Do this |
+|---|---|
+| VoiceOS doesn't ring you in Act 1 | Say it more plainly: *"call my mobile and tell me what you find."* If it still won't, shoot Act 2 as an inbound call you place, and cut Act 1 to the booking only. |
+| The flight lookup comes back shallow | Ask directly: *"check Kayak for SFO to LAX tomorrow."* Verified working with that phrasing. |
+| Seven is available | Someone freed the slot. Ask availability first, then request a time that's listed as taken. |
+| It talks over itself on the callback | Shouldn't happen — the echo fix is in — but if it does, re-run the take. Don't lower `HG_ECHO_TAIL`. |
+| Long silence mid-task | Cut it in the edit. Question straight to answer. |
+
 ## Cutting rules
 
-- **If a take stalls, cut it.** Dead air reads as broken, even when the agent is
-  working. Cut from question to answer.
-- **Never speed up the agent's voice.** Latency is a thing you're being scored on;
-  faking it is the same sin the product exists to prevent.
-- **Don't narrate over the agent talking.** Let it speak, then narrate in the gap.
-- **Show the failures you engineered** (unavailable slot, refused claim). Show
-  none you didn't.
-- If Beat 4 won't behave after three takes, **drop it**. Beats 1–3 are the entry.
+- **Never speed up the agent's voice.** Latency is scored; faking it is the same
+  sin the product exists to prevent.
+- **Don't narrate over it talking.** Let it finish, then speak into the gap.
+- **Show the failures you engineered** — the unavailable slot, the refused claim.
+  Show none you didn't.
+- **Cut dead air ruthlessly.** A working agent that pauses eight seconds reads as
+  broken on video even though it isn't.
+- If an act needs more than four takes, ship the take you have. A slightly rough
+  real demo beats a polished one you ran out of time to finish.
