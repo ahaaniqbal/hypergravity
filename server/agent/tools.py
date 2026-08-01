@@ -835,7 +835,14 @@ def build_tools(ledger: Ledger, cp: Counterparty) -> tuple[ToolsSchema, dict[str
                     "description": "Short description in the caller's words, e.g. 'the big files in Downloads'.",
                 },
                 "command": {"type": "string", "description": "Shell command to run, if it's a machine task."},
-                "web_query": {"type": "string", "description": "Search or URL, if it's a web task."},
+                "web_query": {
+                    "type": "string",
+                    "description": (
+                        "For a web task: a full URL carrying the query, e.g. "
+                        "kayak.com/flights/SFO-LAX/2026-08-03. Use the site they "
+                        "named."
+                    ),
+                },
                 "notify": {"type": "string", "description": "Number to text; defaults to the caller."},
             },
             required=["what"],
