@@ -737,7 +737,11 @@ def build_tools(ledger: Ledger, cp: Counterparty) -> tuple[ToolsSchema, dict[str
                         "{\"click\": \"visible text on the link or button\"}, "
                         "{\"type\": {\"into\": \"field label\", \"text\": \"…\"}}, "
                         "{\"wait\": seconds}. Start with a go, then fill the "
-                        "search fields and click through to the actual result."
+                        "search fields and click through to the actual result. "
+                        "Best is a URL that already carries the query, e.g. "
+                        "kayak.com/flights/SFO-LAX/2026-08-01 — a site's home "
+                        "page shows marketing, not answers. Add a wait of 6-8 "
+                        "after a search so results render."
                     ),
                     "items": {"type": "object"},
                 },
