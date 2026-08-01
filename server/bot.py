@@ -407,12 +407,9 @@ def _install_texml_route() -> None:
     # TeXML that pointed Telnyx at a dead tunnel: the webhook answered, the call
     # connected, and the audio socket went nowhere. The line rings and then
     # silence, with nothing in the logs that looks wrong.
-    proxy = ""
-    if "--proxy" in sys.argv:
-        i = sys.argv.index("--proxy")
-        if i + 1 < len(sys.argv):
-            proxy = sys.argv[i + 1].strip()
-    proxy = proxy or os.getenv("TUNNEL_HOST", "")
+    from agent.delegate import tunnel_host
+
+    proxy = tunnel_host()
     if not proxy:
         return
 

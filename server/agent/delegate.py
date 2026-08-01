@@ -23,6 +23,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -141,13 +142,30 @@ async def build_and_report(request: str, deadline_seconds: int = DEADLINE) -> st
     raise RuntimeError(f"the build produced nothing. It said: {tail}")
 
 
+def tunnel_host() -> str:
+    """The tunnel this process is actually serving on.
+
+    The --proxy argument wins over the environment because it is the only one of
+    the two that is necessarily current: run.sh discovers the tunnel at startup
+    and passes it, whereas TUNNEL_HOST in .env is whatever was true the last time
+    anyone wrote it down. A quick tunnel gets a new name on every restart, so the
+    recorded value is stale by default — and a stale value here means texting
+    somebody a link to a hostname that stopped resolving two restarts ago.
+    """
+    if "--proxy" in sys.argv:
+        i = sys.argv.index("--proxy")
+        if i + 1 < len(sys.argv):
+            return sys.argv[i + 1].strip()
+    return os.getenv("TUNNEL_HOST", "").strip()
+
+
 def public_link(path: Path) -> str | None:
     """A URL for a file we just built, served over the tunnel we already have.
 
     The alternative is texting someone an absolute path on a laptop they are
     nowhere near.
     """
-    host = os.getenv("TUNNEL_HOST", "").strip()
+    host = tunnel_host()
     if not host or not path.exists():
         return None
     try:

@@ -84,6 +84,33 @@ def _phrase(job: Job) -> str:
     return f"{head} ({took}).\n\n{body}" if body else f"{head} ({took})."
 
 
+_SPOKEN_LIMIT = 220
+
+
+def _headline(result: str) -> str:
+    """The part of a result worth saying out loud.
+
+    A web lookup comes back as a page: a trace of what was done, a title, then
+    however much text the page had. None of that is an answer to "what does the
+    flight cost", and reading it aloud is worse than saying nothing. Take the
+    substantive lines, drop our own bookkeeping, and stop at something a person
+    can hold in their head on a phone call.
+    """
+    lines = [ln.strip() for ln in (result or "").splitlines()]
+    keep = [
+        ln for ln in lines
+        if ln and not ln.startswith(("WHAT I DID:", "PAGE:", "===", "http"))
+    ]
+    said = " ".join(keep).strip()
+    if not said:
+        return ""
+    if len(said) > _SPOKEN_LIMIT:
+        cut = said[:_SPOKEN_LIMIT]
+        said = cut[: cut.rfind(" ")] if " " in cut else cut
+        said += ", and there's more in the text I just sent you"
+    return said
+
+
 def _spoken(job: Job) -> str:
     """The first line of the call-back. Spoken verbatim, so it has to sound spoken.
 
@@ -94,6 +121,12 @@ def _spoken(job: Job) -> str:
     who = os.getenv("OWNER_NAME", "").strip()
     hello = f"Hey {who}, it's your Mac." if who else "Hey, it's your Mac."
     if job.ok:
+        # Lead with the answer, not the fact that there is one. They asked what
+        # the flight costs; ringing them to say "that's done" makes them ask the
+        # question a second time, on a call they are already holding.
+        answer = _headline(job.result)
+        if answer:
+            return f"{hello} {job.what} — {answer}"
         return f"{hello} That thing you asked for — {job.what} — is done."
     reason = (job.result or "").strip().replace("\n", " ")
     tail = f" {reason[:110]}" if reason else ""
