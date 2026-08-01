@@ -1,44 +1,63 @@
 #!/usr/bin/env bash
-# Keep the line up while judges may be calling.
+# Keep the line answerable while judges may be calling.
 #
-# run.sh is the real supervisor, but it owns cloudflared — and cloudflare started
-# returning 429 on quick-tunnel creation after a day of restarts, so the tunnel
-# here is localtunnel on a PINNED subdomain. Pinned matters more than it sounds:
-# a random hostname on every restart means the number ends up pointed at a tunnel
-# that no longer exists, the webhook answers nothing, and the caller hears a
-# carrier error while every log on this machine looks healthy.
+# Tunnel history, because the choice is not arbitrary: cloudflared is the good
+# option and run.sh uses it, but cloudflare began returning 429 on quick-tunnel
+# creation after a day of restarts. localtunnel was the fallback and measured
+# 3 requests in 10 — a judge would have failed seven calls out of ten and
+# concluded the project was broken. localhost.run measured 10 in 10, twice.
 #
-# Restarting a dead bot is the easy half. The half that actually bit us is
-# re-pointing, so this checks the number's routing every cycle rather than only
-# after a restart.
+# The hostname is not stable across SSH sessions, so this does not just restart
+# things: when the tunnel comes back with a different name it restarts the bot on
+# the new one and re-points the number. That sequence — new URL, stale routing —
+# is the exact failure that ate calls all day, and it is silent from the outside.
+# The line rings and the caller hears a carrier error while every log here looks
+# perfectly healthy.
 set -uo pipefail
 cd "$(dirname "$0")"
 
-SUBDOMAIN="${HG_SUBDOMAIN:-hypergravity}"
-HOST="$SUBDOMAIN.loca.lt"
 PORT=7860
-source_env() { set -a; . ./.env; set +a; }
-source_env
+SSH_LOG=/tmp/lhr.log
+set -a; . ./.env; set +a
 
 say() { printf "\033[36m▸\033[0m %s\n" "$*"; }
 ok()  { printf "\033[32m✓\033[0m %s\n" "$*"; }
 bad() { printf "\033[31m✗\033[0m %s\n" "$*"; }
 
-bot_up()    { curl -sf -o /dev/null -m 5 -X POST "http://127.0.0.1:$PORT/ws" -d "CallSid=hc" 2>/dev/null; }
-tunnel_up() { curl -sf -o /dev/null -m 10 -X POST "https://$HOST/ws" -H "User-Agent: keepalive" -d "CallSid=hc" 2>/dev/null; }
+HOST=""
+
+bot_up() { curl -sf -o /dev/null -m 6 -X POST "http://127.0.0.1:$PORT/ws" -d "CallSid=hc" 2>/dev/null; }
+
+tunnel_url() { grep -oE 'https://[a-z0-9-]+\.lhr\.life' "$SSH_LOG" 2>/dev/null | tail -1; }
+
+tunnel_up() {
+  [ -n "$HOST" ] || return 1
+  curl -sf -o /dev/null -m 12 -X POST "https://$HOST/ws" -H "User-Agent: keepalive" -d "CallSid=hc" 2>/dev/null
+}
 
 start_tunnel() {
-  pkill -f "localtunnel --port $PORT" 2>/dev/null
+  pkill -f "ssh.*localhost.run" 2>/dev/null
   sleep 1
-  nohup npx -y localtunnel --port "$PORT" --subdomain "$SUBDOMAIN" > /tmp/lt.log 2>&1 &
-  sleep 12
+  : > "$SSH_LOG"
+  nohup ssh -o StrictHostKeyChecking=no -o ConnectTimeout=20 \
+            -o ServerAliveInterval=30 -o ServerAliveCountMax=3 \
+            -R 80:localhost:$PORT nokey@localhost.run >> "$SSH_LOG" 2>&1 &
+  for _ in $(seq 1 15); do
+    sleep 2
+    local u; u=$(tunnel_url)
+    if [ -n "$u" ]; then HOST="${u#https://}"; ok "tunnel up on $HOST"; return 0; fi
+  done
+  bad "tunnel did not come up"
+  return 1
 }
 
 start_bot() {
   pkill -f "bot.py -t telnyx" 2>/dev/null
   sleep 2
   ( cd server && nohup uv run bot.py -t telnyx --proxy "$HOST" >> /tmp/hypergravity.log 2>&1 & )
-  sleep 20
+  for _ in $(seq 1 20); do sleep 2; bot_up && { ok "bot up"; return 0; }; done
+  bad "bot did not come up"
+  return 1
 }
 
 point_number() {
@@ -52,25 +71,36 @@ point_number() {
   esac
 }
 
-say "keepalive on https://$HOST — ctrl-c to stop"
-bot_up    || { say "bot down, starting";    start_bot; }
-tunnel_up || { say "tunnel down, starting"; start_tunnel; }
+# The bot bakes its hostname in at startup (it serves it inside the TeXML), so a
+# changed tunnel means the bot is now advertising a URL that no longer resolves.
+# Restart it before re-pointing, or the number is correct and the audio socket
+# still goes nowhere.
+adopt_host() {
+  local previous="$1"
+  if [ "$HOST" != "$previous" ]; then
+    say "tunnel hostname changed: ${previous:-none} → $HOST"
+    start_bot
+  fi
+  point_number
+}
+
+say "keepalive starting"
+HOST=$(tunnel_url); HOST="${HOST#https://}"
+tunnel_up || start_tunnel
+bot_up    || start_bot
 point_number
+say "watching — ctrl-c to stop"
 
 while true; do
   sleep 30
-  if ! bot_up; then
-    bad "bot stopped answering — restarting"
-    start_bot
-    point_number
-    continue
-  fi
   if ! tunnel_up; then
     bad "tunnel stopped answering — restarting"
-    start_tunnel
-    # The subdomain is pinned, so the URL is unchanged — but re-point anyway.
-    # Being pointed at the right place is cheap; discovering you weren't costs a
-    # judge's phone call, and there is no second impression.
-    point_number
+    prev="$HOST"
+    start_tunnel && adopt_host "$prev"
+    continue
+  fi
+  if ! bot_up; then
+    bad "bot stopped answering — restarting"
+    start_bot && point_number
   fi
 done
