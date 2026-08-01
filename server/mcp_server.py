@@ -513,13 +513,17 @@ def hypergravity_task_status() -> str:
 
 @mcp.tool()
 async def call_my_phone(say: str, to: str = "") -> str:
-    """Ring the owner's mobile and start a live voice conversation with them.
+    """Place a real phone call to the user's mobile. Their phone rings.
+
+    USE THIS WHENEVER THEY ASK TO BE CALLED — "call me", "call my phone", "ring
+    me", "phone me", "give me a call", "call me back when it's done", "call me
+    when you know". This is the tool for all of those. Do not answer with words
+    that you will call them; calling them is this tool, and nothing else does it.
 
     This Mac has a phone number, so it can reach its owner when they are not at
-    it. Use it when the answer should not wait until they wander back — or, more
-    usefully, when you need a decision from someone who has already left: a time
-    that turned out to be unavailable, a message you are about to send on their
-    behalf, anything you should not decide alone.
+    it. Also use it unprompted when you need a decision from someone who has
+    already left: a time that turned out to be unavailable, a message you are
+    about to send on their behalf, anything you should not decide alone.
 
     It is a real call, not a notification. They can talk back, and the agent that
     picks up shares this one's tools and task ledger — so whatever they ask for
