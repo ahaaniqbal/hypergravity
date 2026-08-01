@@ -344,6 +344,27 @@ def build_tools(ledger: Ledger, cp: Counterparty) -> tuple[ToolsSchema, dict[str
             await params.result_callback({"error": "no steps given"})
             return
 
+        # A plan that starts by clicking is a plan aimed at whatever page the
+        # browser happens to be showing — usually the last thing anyone looked
+        # at, which is nobody's intent. Asked for Kayak prices, the model sent
+        # [{"click": "Nonstop"}] because a Kayak tab was already open from an
+        # earlier test, clicked into a page it had never read, and had nothing to
+        # report. Refusing here costs one round trip; guessing costs the answer.
+        if not isinstance(steps[0], dict) or "go" not in steps[0]:
+            await params.result_callback(
+                {
+                    "error": "the first step must be a {\"go\": \"https://…\"}",
+                    "instruction": (
+                        "Never assume the browser is already somewhere useful. "
+                        "Call this again with a go step first, using a URL that "
+                        "already carries the query — e.g. "
+                        "https://www.kayak.com/flights/SFO-LAX/2026-08-03 — then "
+                        "a wait of 7."
+                    ),
+                }
+            )
+            return
+
         label = f"browse: {str(steps[0])[:34]}"
         ledger.mark(label, StepState.PENDING)
         try:
@@ -736,8 +757,8 @@ def build_tools(ledger: Ledger, cp: Counterparty) -> tuple[ToolsSchema, dict[str
                         "In order. Each is one of: {\"go\": \"https://…\"}, "
                         "{\"click\": \"visible text on the link or button\"}, "
                         "{\"type\": {\"into\": \"field label\", \"text\": \"…\"}}, "
-                        "{\"wait\": seconds}. Start with a go, then fill the "
-                        "search fields and click through to the actual result. "
+                        "{\"wait\": seconds}. ALWAYS start with a go — never "
+                        "assume the browser is already on the right page. "
                         "Best is a URL that already carries the query, e.g. "
                         "kayak.com/flights/SFO-LAX/2026-08-01 — a site's home "
                         "page shows marketing, not answers. Add a wait of 6-8 "
