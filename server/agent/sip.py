@@ -44,6 +44,26 @@ USER = os.getenv("A1_SIP_USERNAME", "")
 PASSWORD = os.getenv("A1_SIP_PASSWORD", "")
 CALLER_ID = os.getenv("A1_PHONE_NUMBER", "")
 
+
+def _reload_env() -> None:
+    """Re-read the credentials from the environment.
+
+    These are module-level for readability, which means they are captured the
+    moment this file is imported — and bot.py imports the agent package before it
+    calls load_dotenv(). Normally run.sh exports .env before Python starts and
+    nobody notices; start the bot any other way and every value here is the empty
+    string, so the agent reports that SIP "isn't configured" on a machine where it
+    is perfectly well configured. Reading again at the point of use costs three
+    dictionary lookups and removes a failure that only appears when someone
+    launches the bot a slightly different way.
+    """
+    global DOMAIN, PORT, USER, PASSWORD, CALLER_ID
+    DOMAIN = os.getenv("A1_SIP_HOST", "sip.telnyx.com")
+    PORT = int(os.getenv("A1_SIP_PORT", "5060"))
+    USER = os.getenv("A1_SIP_USERNAME", "")
+    PASSWORD = os.getenv("A1_SIP_PASSWORD", "")
+    CALLER_ID = os.getenv("A1_PHONE_NUMBER", "")
+
 RING_TIMEOUT = 45.0
 
 
@@ -233,6 +253,7 @@ def _register(sig: _Socket) -> str:
 
 def _place(to: str) -> SipCall:
     """Blocking: register, invite, ack. Returns once the far end answers."""
+    _reload_env()
     if not USER or not PASSWORD:
         raise SipError("A1_SIP_USERNAME / A1_SIP_PASSWORD are not set")
 
@@ -345,4 +366,5 @@ async def place_call(to: str) -> SipCall:
 
 
 def configured() -> bool:
+    _reload_env()
     return bool(USER and PASSWORD and CALLER_ID)
