@@ -214,13 +214,14 @@ def _parse_people(raw: str) -> list[dict[str, Any]]:
         parts = [p.strip() for p in line.split("\t")]
         if not parts or not parts[0]:
             continue
-        handles = [normalise(h) for h in parts[1:] if h.strip()]
         seen: list[str] = []
-        for h in handles:
+        for h in (normalise(p) for p in parts[1:] if p.strip()):
             if h and h not in seen:
                 seen.append(h)
-        if seen:
-            people.append({"name": parts[0], "handles": seen})
+        # Kept even with no number at all. Dropping them turns "Dave is in your
+        # contacts but you have no number for him" into "you have no Dave",
+        # which is a different and false thing to tell someone.
+        people.append({"name": parts[0], "handles": seen})
     return people
 
 
@@ -238,10 +239,17 @@ on run argv
       set svc to 1st account whose service type = iMessage
       send theBody to participant theHandle of svc
       return "iMessage"
-    on error
-      set svc to 1st account whose service type = SMS
-      send theBody to participant theHandle of svc
-      return "SMS"
+    on error firstError
+      try
+        set svc to 1st account whose service type = SMS
+        send theBody to participant theHandle of svc
+        return "SMS"
+      on error secondError
+        -- Both reasons. The SMS one alone is misleading: the usual cause is
+        -- that the number is not on iMessage and this Mac has no SMS
+        -- forwarding, and only the pair of errors says that.
+        error "iMessage said: " & firstError & " — SMS said: " & secondError
+      end try
     end try
   end tell
 end run
@@ -545,6 +553,12 @@ async def message_person(who: str, body: str, handle: str = "") -> dict[str, Any
         }
 
     person = matches[0]
+    if not person["handles"]:
+        return {
+            "sent": False, "verified": False, "found": True, "contacts_readable": True,
+            "name": person["name"],
+            "reason": f"{person['name']} is in Contacts but has no number or email saved",
+        }
     if not body:  # a lookup, not a send
         return {
             "sent": False, "verified": False, "found": True,

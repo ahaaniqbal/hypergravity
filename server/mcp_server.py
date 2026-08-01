@@ -268,6 +268,8 @@ async def find_contact(name: str) -> str:
         names = ", ".join(m["name"] for m in matches[:6])
         return f"MORE THAN ONE MATCH — {names}. Ask which one before sending anything."
     one = matches[0]
+    if not one["handles"]:
+        return f"{one['name']} is in Contacts but has no number or email saved."
     return f"{one['name']}: {', '.join(one['handles'])}"
 
 

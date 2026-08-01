@@ -226,3 +226,4 @@ server/.ledgers.json
 
 server/.memory.json
 server/eval-runs/
+server/.claude/
