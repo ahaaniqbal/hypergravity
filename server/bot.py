@@ -13,6 +13,7 @@ Run::
 
 import asyncio
 import os
+import sys
 import uuid
 
 from dotenv import load_dotenv
@@ -396,7 +397,20 @@ def _install_texml_route() -> None:
     from fastapi.responses import HTMLResponse, JSONResponse
     from pipecat.runner.run import app
 
-    proxy = os.getenv("TUNNEL_HOST", "")
+    # The --proxy argument wins over the environment, because it is the only one
+    # of the two that is necessarily current. run.sh discovers the tunnel at
+    # startup and passes it here, but load_dotenv(override=True) above then
+    # replaces TUNNEL_HOST with whatever .env last recorded — which after a
+    # reboot is a hostname that no longer resolves. Reading the env meant serving
+    # TeXML that pointed Telnyx at a dead tunnel: the webhook answered, the call
+    # connected, and the audio socket went nowhere. The line rings and then
+    # silence, with nothing in the logs that looks wrong.
+    proxy = ""
+    if "--proxy" in sys.argv:
+        i = sys.argv.index("--proxy")
+        if i + 1 < len(sys.argv):
+            proxy = sys.argv[i + 1].strip()
+    proxy = proxy or os.getenv("TUNNEL_HOST", "")
     if not proxy:
         return
 
