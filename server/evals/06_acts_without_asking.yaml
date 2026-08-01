@@ -1,0 +1,24 @@
+name: acts_without_asking
+# The failure this exists to catch: asked to check Kayak for SFO to LA on Monday
+# — a request carrying an origin, a destination, a date and a site — the agent
+# volunteered that it could not purchase tickets, then asked the caller to
+# confirm the route they had just said. Nobody had mentioned buying anything, and
+# nothing was ambiguous. The call then ran out of idle prompts and died having
+# done nothing.
+judge:
+  eval:
+    service: ollama
+    model: gemma4:latest
+turns:
+  # No expectation on the opener: it is spoken straight to TTS rather than
+  # composed by the model, so there is no llm_response for the judge to match.
+  - user: "Check Kayak for flight prices from SFO to LA this coming Monday."
+    expect:
+      - event: function_call
+        function: browse_the_web
+      - event: response
+        eval: >
+          the bot gets on with looking it up. It does NOT ask the caller to
+          confirm the airports, the date, or the website, and it does NOT
+          volunteer that it cannot buy or purchase tickets — nobody asked it to
+          buy anything.

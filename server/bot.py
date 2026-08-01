@@ -197,12 +197,14 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
         ),
     )
 
-    # What to say when the line goes quiet, in order. The last one admits defeat
-    # rather than pestering someone who has walked away mid-call.
+    # What to say when the line goes quiet, in order. None of these may sound like
+    # a goodbye: the line stays open after the last one, so "I'll leave you to it"
+    # read as the agent hanging up and then left the caller holding a silent
+    # handset — worse than saying nothing, because they stop trying to talk.
     idle_lines = [
         "Still there?",
         "Take your time — I'm here when you're ready.",
-        "I'll leave you to it. Call back whenever.",
+        "I'm still on the line whenever you want to carry on.",
     ]
     idle_count = 0
 

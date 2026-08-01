@@ -11,3 +11,4 @@ suite:
       - evals/03_gate.yaml
       - evals/04_cannot_do.yaml
       - evals/05_memory_of_call.yaml
+      - evals/06_acts_without_asking.yaml
