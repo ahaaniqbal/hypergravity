@@ -447,6 +447,18 @@ def _install_texml_route() -> None:
         if not configured():
             return JSONResponse({"error": "SIP is not configured"}, status_code=503)
         body = await request.json() if await request.body() else {}
+
+        # Answer "can this place a call" without placing one. Checking SIP by
+        # dialling means every health check rings a real handset, and someone
+        # picks up to hear a test phrase and nothing else. Ask this instead.
+        if body.get("check"):
+            return JSONResponse({
+                "sip_configured": True,
+                "from": CALLER_ID,
+                "would_call": str(body.get("to") or os.getenv("MY_PHONE", "")),
+                "dialled": False,
+            })
+
         to = str(body.get("to") or os.getenv("MY_PHONE", "")).strip()
         if not to:
             return JSONResponse({"error": "no number to call"}, status_code=400)
