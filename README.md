@@ -22,14 +22,24 @@ let you check the claims yourself, in rough order of how little setup each needs
 
 ### 1 · Read the gate's own log — no setup at all
 
-`server/verification_log.jsonl` is written by the tool layer during real calls.
-**26 decisions: 18 ALLOWED, 8 BLOCKED.**
+The tool layer writes a line every time a success is claimed. The live file
+(`server/verification_log.jsonl`) is runtime output — git-ignored, and it grows
+as the line is used — so a snapshot ships with the repo instead, with the caller
+numbers masked:
 
 ```bash
 python3 -c "
-import json;[print(r['verdict'],'-',r['reason']) for r in
-map(json.loads,open('server/verification_log.jsonl'))]"
+import json,collections
+r=[json.loads(l) for l in open('server/verification_log.sample.jsonl') if l.strip()]
+print(len(r),'decisions:',dict(collections.Counter(x['verdict'] for x in r)))
+[print(x['verdict'],'-',x['reason']) for x in r]"
 ```
+
+**36 decisions: 22 ALLOWED, 14 BLOCKED**, captured at submission. On the machine
+that has been taking the calls, point the same snippet at
+`verification_log.jsonl` and the numbers will be higher — the eval suite in
+section 3 appends to it, so you can watch the log grow rather than take this
+one on trust.
 
 The BLOCKED lines are the point. Each one is a moment the agent tried to claim a
 success it could not evidence, and was stopped:
@@ -39,7 +49,7 @@ BLOCKED — token '4242' was never recorded by the tool layer for 'booking' —
           the model produced it, the counterparty did not
 ```
 
-### 2 · Read the gate itself — 60 lines
+### 2 · Read the gate itself — 163 lines
 
 `server/agent/gate.py`. The claim is made **once, against the booking**, and it
 is checked against evidence the *tool layer* wrote. The model can never write
