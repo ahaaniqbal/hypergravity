@@ -69,8 +69,11 @@ MODEL = os.getenv("OPENAI_MODEL", "openai.gpt-5.6-sol")
 TASK_BASE = os.getenv("TASK_ID", "hypergravity-live")
 
 # How long a caller can be silent before we check they are still there. Long
-# enough to think, short enough that the line never feels dead.
-IDLE_SECONDS = float(os.getenv("IDLE_SECONDS", "9"))
+# enough to think, short enough that the line never feels dead. Nine seconds was
+# too eager once the agent could act on the Mac: the caller turns to watch
+# something happen on screen, and gets asked three times whether they're still
+# there before they've finished looking.
+IDLE_SECONDS = float(os.getenv("IDLE_SECONDS", "15"))
 
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> None:

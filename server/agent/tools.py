@@ -29,6 +29,7 @@ from .ledger import Ledger, StepState
 from .mac_calendar import CalendarError, add_verified_event, busy_if_known, clashes_in
 from .mac_agent import use_app as mac_use_app
 from .mac_control import run as mac_run, tell_app as mac_tell_app
+from .mac_messages import message_person
 from .web import WebError, browse, look_up, peek
 
 
@@ -212,6 +213,10 @@ def build_tools(ledger: Ledger, cp: Counterparty) -> tuple[ToolsSchema, dict[str
         # Delivery must be positively evidenced. "No known error word in a
         # field that is usually absent" is not evidence of anything.
         if not _sms_delivered(resp):
+            # `prose` used to be read here without ever being assigned, so the
+            # one branch that reports a failed text raised NameError instead —
+            # the caller heard nothing at all about a text that never went.
+            prose = str(resp.get("_text", "")).strip() or "the network did not confirm it"
             ledger.mark("send SMS", StepState.FAILED, prose)
             await params.result_callback(
                 {
@@ -575,6 +580,103 @@ def build_tools(ledger: Ledger, cp: Counterparty) -> tuple[ToolsSchema, dict[str
         ledger.mark("add to calendar", StepState.DONE, row["starts"])
         await params.result_callback({"added": True, "event": row})
 
+    async def message_someone(params: FunctionCallParams) -> None:
+        """Find them in Contacts, message them, and read it back.
+
+        Three outcomes are deliberately kept apart, because collapsing any two
+        of them is how someone gets told a message went to a person it never
+        reached: nobody by that name, more than one person by that name, and a
+        message sent but not provably delivered.
+        """
+        a = params.arguments
+        who = str(a.get("to", "")).strip()
+        body = str(a.get("body", "")).strip()
+        handle = str(a.get("handle", "")).strip()
+
+        # "text me" needs no address book — we already know who is on the line.
+        if who.lower() in ("me", "myself", "my phone") and not handle:
+            handle = ledger.caller_phone or MY_PHONE
+            who = "you"
+        if not who and not handle:
+            await params.result_callback({"sent": False, "reason": "no-one to message"})
+            return
+
+        label = f"message {who or handle}"[:40]
+        ledger.mark(label, StepState.PENDING)
+        try:
+            r = await message_person(who, body, handle)
+        except Exception as e:  # noqa: BLE001 — never let this raise into the call
+            ledger.mark(label, StepState.FAILED, str(e)[:60])
+            await params.result_callback({"sent": False, "verified": False, "reason": str(e)})
+            return
+
+        if r.get("ambiguous"):
+            ledger.mark(label, StepState.FAILED, "more than one match")
+            await params.result_callback(
+                {
+                    **r,
+                    "instruction": (
+                        "You do NOT know which one they meant. Read the names out and "
+                        "ask which. Do not pick one, and do not send anything yet."
+                    ),
+                }
+            )
+            return
+
+        if r.get("contacts_readable") is False:
+            ledger.mark(label, StepState.FAILED, "contacts unreadable")
+            await params.result_callback(
+                {
+                    **r,
+                    "instruction": (
+                        "You could not open Contacts, so you do NOT know whether they "
+                        "have that person saved. Say you couldn't get at the address "
+                        "book and offer to send it if they read you the number."
+                    ),
+                }
+            )
+            return
+
+        if not r.get("sent"):
+            ledger.mark(label, StepState.FAILED, str(r.get("reason", ""))[:60])
+            await params.result_callback(
+                {
+                    **r,
+                    "instruction": (
+                        "Nothing was sent. Say so plainly and say why in a few words."
+                    ),
+                }
+            )
+            return
+
+        if not r.get("verified"):
+            # Handed to Messages, but not found on re-read. The command not
+            # erroring is the app agreeing with itself; it is not delivery.
+            ledger.mark(label, StepState.FAILED, "unverified")
+            logger.warning(f"message to {r.get('to')} unverified: {r.get('reason')}")
+            await params.result_callback(
+                {
+                    **r,
+                    "instruction": (
+                        "You may NOT say it sent. Tell them you passed it to Messages "
+                        "but could not confirm it went, and let them check."
+                    ),
+                }
+            )
+            return
+
+        ledger.record_evidence("message", str(r.get("to")), r)
+        ledger.mark(label, StepState.DONE, str(r.get("to")))
+        await params.result_callback(
+            {
+                **r,
+                "instruction": (
+                    "Sent AND read back from Messages itself. Say who it went to by "
+                    "name in one short sentence. Don't read the message back."
+                ),
+            }
+        )
+
     # -- the gate -------------------------------------------------------------
 
     async def claim_task_complete(params: FunctionCallParams) -> None:
@@ -623,7 +725,10 @@ def build_tools(ledger: Ledger, cp: Counterparty) -> tuple[ToolsSchema, dict[str
     schemas = [
         FunctionSchema(
             name="browse_the_web",
-            description="Browse in the user's Chrome and read the page. Steps run in one go.",
+            description=(
+                "Browse in the user's Chrome and read the page. Plan the WHOLE "
+                "task: loading a site answers nothing. Call again to go deeper."
+            ),
             properties={
                 "steps": {
                     "type": "array",
@@ -631,7 +736,8 @@ def build_tools(ledger: Ledger, cp: Counterparty) -> tuple[ToolsSchema, dict[str
                         "In order. Each is one of: {\"go\": \"https://…\"}, "
                         "{\"click\": \"visible text on the link or button\"}, "
                         "{\"type\": {\"into\": \"field label\", \"text\": \"…\"}}, "
-                        "{\"wait\": seconds}. Start with a go."
+                        "{\"wait\": seconds}. Start with a go, then fill the "
+                        "search fields and click through to the actual result."
                     ),
                     "items": {"type": "object"},
                 },
@@ -710,7 +816,10 @@ def build_tools(ledger: Ledger, cp: Counterparty) -> tuple[ToolsSchema, dict[str
         ),
         FunctionSchema(
             name="run_on_mac",
-            description='Run a shell command and read its output. Files, code, git, opening apps.',
+            description=(
+                "Run a shell command and read its output. Files, folders, git, code; "
+                "`open` for apps and Finder; `osascript -e` for AppleScript."
+            ),
             properties={
                 "command": {"type": "string", "description": "The shell command."},
                 "cwd": {"type": "string", "description": "Directory to run it in, optional."},
@@ -791,6 +900,23 @@ def build_tools(ledger: Ledger, cp: Counterparty) -> tuple[ToolsSchema, dict[str
             },
             required=["booking_id"],
             handler=claim_task_complete,
+        ),
+        FunctionSchema(
+            name="message_someone",
+            description=(
+                "Text someone from Contacts, then read it back to prove it went. "
+                "'me' is the caller. Empty body just looks up their number."
+            ),
+            properties={
+                "to": {"type": "string", "description": "Their name, e.g. 'Dave'."},
+                "body": {"type": "string", "description": "The whole message."},
+                "handle": {
+                    "type": "string",
+                    "description": "Exact number/email, once they've picked a name.",
+                },
+            },
+            required=["to"],
+            handler=message_someone,
         ),
         FunctionSchema(
             name="task_status",

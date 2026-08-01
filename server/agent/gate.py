@@ -73,6 +73,8 @@ def _how_to_check(kind: str, token: str) -> str:
         return f"check the handset at {token} for the confirmation text"
     if kind == "calendar":
         return "open Calendar.app — the event is in the Home calendar, no credentials needed"
+    if kind == "message":
+        return f"open Messages.app — the conversation with {token} has it, no credentials needed"
     return token
 
 

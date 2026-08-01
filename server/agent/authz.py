@@ -29,6 +29,12 @@ PRIVILEGED = {
     "work_in_background",
     "add_to_calendar",
     "add_to_mac_calendar",
+    # The address book, and the ability to send from the owner's own iMessage
+    # account. Strangers reach this number too, and a message from Ahaan's
+    # handset to Ahaan's contacts is the most abusable thing here — worse than
+    # a shell, because it arrives wearing his name.
+    "message_someone",
+    "find_contact",
 }
 
 # Safe for anyone: the counterparty, the gate, and reading task state. This is

@@ -36,6 +36,7 @@ from agent.background import running_jobs, start as start_background  # noqa: E4
 from agent.delegate import build_and_report  # noqa: E402
 from agent.mac_agent import use_app as mac_use_app  # noqa: E402
 from agent.mac_control import run as mac_run, tell_app as mac_tell_app  # noqa: E402
+from agent.mac_messages import find_people, message_person  # noqa: E402
 from agent.web import WebError, browse, look_up  # noqa: E402
 
 TASK_ID = os.getenv("TASK_ID", "hypergravity-live")
@@ -240,6 +241,97 @@ async def control_app(app: str, applescript: str) -> str:
     r = await mac_tell_app(app, applescript)
     led.mark(label, StepState.DONE if r.get("ok") else StepState.FAILED)
     return str(r.get("result")) if r.get("ok") else f"{app} refused — {r.get('reason')}"
+
+
+@mcp.tool()
+async def find_contact(name: str) -> str:
+    """Look someone up in this Mac's Contacts and read back their numbers.
+
+    Use before messaging anyone whose number you were not given. If more than
+    one person matches, ask which — never pick one.
+
+    Args:
+        name: A first name, full name, or how they were referred to
+            ("my friend Dave" works; the filler is stripped).
+    """
+    found = await find_people(name)
+    if not found.get("readable"):
+        # An address book we could not open is not an empty address book.
+        return (
+            f"COULD NOT READ CONTACTS — {found.get('reason')}. You do NOT know "
+            "whether they have this person saved; do not say they don't."
+        )
+    matches = found.get("matches") or []
+    if not matches:
+        return f"No-one in Contacts matches {found.get('searched') or name!r}."
+    if len(matches) > 1:
+        names = ", ".join(m["name"] for m in matches[:6])
+        return f"MORE THAN ONE MATCH — {names}. Ask which one before sending anything."
+    one = matches[0]
+    return f"{one['name']}: {', '.join(one['handles'])}"
+
+
+@mcp.tool()
+async def message_someone(to: str, body: str = "", handle: str = "") -> str:
+    """Send an iMessage to someone in Contacts, then read it back to prove it went.
+
+    Resolves the name, sends through Messages' own scripting API (not by
+    clicking), then re-reads the message out of the Messages database to confirm
+    it exists, says the right thing, and went to the right person. A send that
+    cannot be confirmed is reported as unconfirmed — never as sent.
+
+    Stops without sending if the name is ambiguous, so the wrong person cannot
+    be messaged by a coin flip.
+
+    Args:
+        to: Who to message, by name. Use "me" for the number on the task.
+        body: The whole message. Leave empty to just look the person up.
+        handle: An exact number or email, once the user has picked between
+            several matching names. Skips the Contacts lookup entirely.
+    """
+    led = _ledger()
+    if to.strip().lower() in ("me", "myself") and not handle:
+        handle = led.caller_phone or os.getenv("MY_PHONE", "")
+        to = "you"
+
+    label = f"message {to or handle}"[:40]
+    led.mark(label, StepState.PENDING)
+    try:
+        r = await message_person(to, body, handle)
+    except Exception as e:  # noqa: BLE001
+        led.mark(label, StepState.FAILED, str(e)[:60])
+        return f"FAILED — {e}"
+
+    if r.get("ambiguous"):
+        led.mark(label, StepState.FAILED, "more than one match")
+        return (
+            f"NOT SENT — {', '.join(r.get('choices') or [])} all match. "
+            "Ask which one. Do not choose for them."
+        )
+    if r.get("contacts_readable") is False:
+        led.mark(label, StepState.FAILED, "contacts unreadable")
+        return (
+            f"COULD NOT READ CONTACTS — {r.get('reason')}. Nothing was sent, and "
+            "you do NOT know whether they have that person saved."
+        )
+    if not r.get("sent"):
+        led.mark(label, StepState.FAILED, str(r.get("reason", ""))[:60])
+        if r.get("handles"):  # a lookup, not a send
+            return f"{r.get('name')}: {', '.join(r['handles'])}"
+        return f"NOT SENT — {r.get('reason')}"
+    if not r.get("verified"):
+        led.mark(label, StepState.FAILED, "unverified")
+        return (
+            f"NOT CONFIRMED — Messages took it for {r.get('to')} but it does not "
+            f"check out on re-read: {r.get('reason')}. You may not say it sent."
+        )
+
+    led.record_evidence("message", str(r.get("to")), r)
+    led.mark(label, StepState.DONE, str(r.get("to")))
+    return (
+        f"VERIFIED — sent to {r.get('name') or r.get('to')} ({r.get('to')}) over "
+        f"{r.get('service')}, then {r.get('how')}."
+    )
 
 
 @mcp.tool()
